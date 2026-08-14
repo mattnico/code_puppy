@@ -132,3 +132,37 @@ memory is planned.
 No missing core hook was identified in Phase 0. The plugin can compose the
 existing builder, wrapper, run-context, lifecycle, tool-policy, and feature
 capability seams without changing core or the command-line package.
+
+## Phase 1 substrate
+
+Phase 1 adds strict contracts and an inert storage substrate. Importing the
+package performs no I/O; `register_callbacks.py` registers only a startup
+initializer and a feature-capability probe. Startup creates storage only when
+`native_agents_enabled` is explicitly truthy. A failed migration leaves the
+feature unavailable and does not affect ordinary agents.
+
+State lives at `STATE_DIR/native_agents/native_agents.sqlite3`, or at the
+explicit `CODE_PUPPY_NATIVE_AGENTS_DB` path used by disposable test sandboxes.
+SQLite migrations are transactional and foreign keys are enabled on every
+connection. Execution records, revisioned state snapshots, and append-only
+redacted events use only JSON-compatible Pydantic data. State updates require
+an expected revision, so stale writers fail with `StateConflictError`.
+
+Phase 1 configuration defaults are bounded:
+
+- `native_agents_enabled`: false;
+- `native_agents_store_retention_days`: 30 (1–3650);
+- `native_agents_context_max_chars`: 12,000 (256–100,000);
+- `native_agents_event_max_per_view`: 30 (0–500);
+- diagnostics and the reserved CodeAct flag remain off.
+
+No native method, generic native tool, prompt fragment, agent registration,
+CodeAct worker, handle store, or capability adapter is exposed yet. Those
+behaviors belong to later phases and must keep this substrate's fail-closed
+contract.
+
+Phase 1 targeted evidence: `tests/plugins/native_agents` passes 20
+deterministic tests covering strict contracts, migrations, state revisions,
+stale conflicts, redaction, immutable events, scope cleanup, cancellation,
+and disabled/failed registration. The repository's existing unrelated
+untracked documentation remains intentionally untouched.

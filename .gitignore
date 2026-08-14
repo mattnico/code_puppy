@@ -17,6 +17,9 @@ wheels/
 # Pytest cache
 .pytest_cache/
 
+# Test orchestrator runtime state
+.wibey-test/
+
 dummy_path
 
 .idea/
