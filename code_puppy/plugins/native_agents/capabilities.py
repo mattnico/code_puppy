@@ -83,10 +83,6 @@ class CapabilityRegistry:
         execution: ExecutionIdentity,
     ) -> BaseModel:
         active_execution = current_execution(required=False)
-        if active_execution is not None and (
-            active_execution.execution_id != execution.execution_id
-        ):
-            raise CapabilityDeniedError("capability execution is not active")
         capability_name = name if isinstance(name, str) else "<invalid>"
         supplied_id = (
             handle.handle_id
@@ -115,6 +111,26 @@ class CapabilityRegistry:
                 "capability_unavailable",
             )
             raise CapabilityNotFoundError("capability is unavailable")
+        if active_execution is not None and (
+            active_execution.execution_id != execution.execution_id
+        ):
+            self._event(
+                execution.execution_id,
+                NativeEventKind.CAPABILITY_REQUESTED,
+                {
+                    "capability": spec.name,
+                    "effect": spec.effect.value,
+                    "handle_id_hash": hashed_id,
+                },
+            )
+            self._record_denial(
+                execution.execution_id,
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                "capability_execution_not_active",
+            )
+            raise CapabilityDeniedError("capability execution is not active")
         if not _strict_boundary_model(spec.input_model) or not _strict_boundary_model(
             spec.output_model
         ):

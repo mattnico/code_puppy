@@ -20,6 +20,7 @@ from code_puppy.plugins.native_agents.errors import (
     HandleUnavailableError,
 )
 from code_puppy.plugins.native_agents.events import EventStore
+from code_puppy.plugins.native_agents.execution import execution_scope
 from code_puppy.plugins.native_agents.reference_store import ReferenceStore
 from code_puppy.plugins.native_agents.state_store import StateStore
 
@@ -274,6 +275,46 @@ async def test_expiry_race_is_denied_and_audited(monkeypatch, tmp_path):
     event = events.list_events(execution.execution_id, limit=20)[-1]
     assert event.kind is NativeEventKind.CAPABILITY_DENIED
     assert event.payload["reason"] == "handle_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_active_execution_mismatch_is_denied_and_audited(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, events, _references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+    called = False
+
+    def handler(*args):
+        nonlocal called
+        called = True
+        return Result(count=1)
+
+    registry.register(spec, handler)
+    active_other = execution.model_copy(update={"execution_id": "other-active"})
+    with pytest.raises(CapabilityDeniedError, match="not active"):
+        async with execution_scope(active_other):
+            await registry.invoke(
+                spec.name,
+                handle,
+                Request(limit=1),
+                method=method,
+                execution=execution,
+            )
+
+    assert called is False
+    assert [
+        event.kind for event in events.list_events(execution.execution_id, limit=20)
+    ][-2:] == [
+        NativeEventKind.CAPABILITY_REQUESTED,
+        NativeEventKind.CAPABILITY_DENIED,
+    ]
+    assert (
+        events.list_events(execution.execution_id, limit=20)[-1].payload["reason"]
+        == "capability_execution_not_active"
+    )
 
 
 @pytest.mark.asyncio
