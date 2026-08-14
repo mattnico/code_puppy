@@ -17,6 +17,10 @@ class NativeContractError(NativeAgentError):
     code = "native_contract_error"
 
 
+class NativeOutputValidationError(NativeAgentError):
+    code = "native_output_validation_failed"
+
+
 class StateConflictError(NativeAgentError):
     code = "state_conflict"
 

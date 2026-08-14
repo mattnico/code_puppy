@@ -565,6 +565,7 @@ def build_pydantic_agent(
     agent: Any,
     output_type: Any = str,
     message_group: Optional[str] = None,
+    retries: int = 3,
 ) -> Any:
     """Build (and wire up) the pydantic-ai agent for ``agent``.
 
@@ -577,6 +578,10 @@ def build_pydantic_agent(
     - ``agent.pydantic_agent``        ← the final (possibly plugin-wrapped) agent
     - ``agent._code_generation_agent`` ← same as ``pydantic_agent``
     - ``agent._mcp_servers``          ← MCP toolsets (post-filter)
+
+    ``retries`` controls Pydantic AI's bounded output/tool validation retries;
+    the default preserves existing behavior. It is intentionally generic so
+    callers with a stricter typed contract can choose a smaller budget.
 
     The build happens in two passes: we construct once with ``toolsets=[]`` so
     we can introspect registered tool names, then rebuild with MCP servers
@@ -607,7 +612,7 @@ def build_pydantic_agent(
             model=model,
             instructions=instructions,
             output_type=output_type,
-            retries=3,
+            retries=retries,
             toolsets=toolsets,
             # Order matters: compaction first (may trim history to fit
             # context), THEN steer injection (a fresh steer must not be

@@ -9,6 +9,7 @@ from code_puppy.callbacks import register_callback
 from code_puppy.messaging import bus_emit_debug
 
 from .config import database_path, is_enabled
+from .registry import registered_agents
 from .storage import initialize_database
 
 logger = logging.getLogger(__name__)
@@ -51,4 +52,5 @@ def _feature_capability(name: str) -> bool | None:
 
 
 register_callback("startup", _initialize_if_enabled)
+register_callback("register_agents", registered_agents)
 register_callback("feature_capability", _feature_capability)

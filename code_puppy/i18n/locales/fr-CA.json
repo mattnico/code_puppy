@@ -1,4 +1,6 @@
 {
+  "native_agents.demo.display_name": "Réviseur natif",
+  "native_agents.demo.description": "Examine le texte de changement fourni et renvoie des constats typés.",
   "startup.welcome": "Bienvenue dans Code Puppy, {name}!",
   "startup.ready": "Prêt à aller chercher du code. 🐶",
   "computer_use.startup.opt_in": "Computer Use de macOS est désactivé par défaut. Exécutez `/computer-use enable` pour l’activer.",

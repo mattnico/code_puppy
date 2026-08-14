@@ -161,6 +161,31 @@ CodeAct worker, handle store, or capability adapter is exposed yet. Those
 behaviors belong to later phases and must keep this substrate's fail-closed
 contract.
 
+## Phase 2 typed prediction
+
+Phase 2 adds the explicit `@native_method` declaration, `NativeAgentMixin`,
+an ephemeral `NativeInvocationAgent`, and `NativeMethodRuntime`. A
+prediction accepts exactly one Pydantic input model and returns exactly the
+declared Pydantic output model. Declarations must be `async`, have a stub body,
+match their input/return annotations, and declare no capabilities. `codeact` is
+rejected rather than silently treated as prediction.
+
+The invocation adapter delegates stable model/tool/MCP configuration to the
+parent but owns history, builder fields, identity, and transient resources.
+Calls on one parent are serialized by a runtime-local lock. The builder's new
+generic `retries` argument is the smallest core seam needed to make the
+method's bounded validation-repair setting truthful; its default remains the
+existing value of three and it contains no native-agent knowledge.
+
+The opt-in `native-reviewer` agent is registered only while
+`native_agents_enabled` is truthy. Its `summarize_change` method returns
+structured findings that ordinary Python can group by severity. It does not
+read files, write files, run shell commands, browse, or use MCP side effects.
+The model prompt is bounded by `ContextBudget`, and the runtime records start,
+validation failure, completion/failure, and cancellation events without
+adding native transcript messages to the parent.
+
+
 Phase 1 targeted evidence: `tests/plugins/native_agents` passes 20
 deterministic tests covering strict contracts, migrations, state revisions,
 stale conflicts, redaction, immutable events, scope cleanup, cancellation,

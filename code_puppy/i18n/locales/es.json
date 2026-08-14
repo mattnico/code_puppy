@@ -1,4 +1,6 @@
 {
+  "native_agents.demo.display_name": "Revisor nativo",
+  "native_agents.demo.description": "Revisa el texto de cambios proporcionado y devuelve hallazgos tipados.",
   "startup.welcome": "¡Bienvenido(a) a Code Puppy, {name}!",
   "startup.ready": "Listo para ir por el código. 🐶",
   "computer_use.startup.opt_in": "Computer Use de macOS está desactivado de forma predeterminada. Ejecuta `/computer-use enable` para activarlo.",

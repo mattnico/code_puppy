@@ -112,6 +112,15 @@ class ContextBudget(_StrictModel, frozen=True):
 
 
 class MethodSpec(_StrictModel, frozen=True):
+    """Immutable declaration metadata; model classes are runtime-only."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        arbitrary_types_allowed=True,
+    )
+
     name: str = Field(min_length=1, max_length=200)
     version: int = Field(default=1, ge=1)
     strategy: NativeStrategyName
@@ -119,3 +128,15 @@ class MethodSpec(_StrictModel, frozen=True):
     output_schema_name: str = Field(min_length=1, max_length=256)
     state_schema_name: str | None = Field(default=None, max_length=256)
     allowed_capabilities: tuple[str, ...] = ()
+    input_type: type[BaseModel] = BaseModel
+    output_type: type[BaseModel] = BaseModel
+    state_type: type[BaseModel] | None = None
+    max_validation_repairs: int = Field(default=1, ge=0, le=3)
+    context_budget: ContextBudget = Field(
+        default_factory=lambda: ContextBudget(
+            max_chars=12_000,
+            max_events=30,
+            max_preview_items=0,
+        )
+    )
+    instructions: str = Field(default="", max_length=8_000)
