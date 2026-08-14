@@ -59,9 +59,10 @@ class ReferenceStore:
         ttl: timedelta | None = None,
     ) -> ReferenceHandle:
         now = datetime.now(timezone.utc)
-        expiry = now + (ttl or self.default_ttl)
-        if expiry <= now or expiry - now > timedelta(hours=2):
+        ttl_value = ttl if ttl is not None else self.default_ttl
+        if ttl_value <= timedelta(0) or ttl_value > timedelta(hours=2):
             raise ValueError("reference TTL must be positive and bounded")
+        expiry = now + ttl_value
         safe_preview = ReferencePreview.model_validate(redact_payload(preview))
         handle = ReferenceHandle(
             handle_id=secrets.token_urlsafe(32),

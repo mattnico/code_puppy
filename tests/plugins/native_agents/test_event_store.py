@@ -40,6 +40,18 @@ def test_event_store_orders_and_bounds_immutable_events(tmp_path):
     assert first.sequence == 1
 
 
+def test_nested_event_payload_is_immutable_after_append(tmp_path):
+    store = _store(tmp_path)
+    event = store.append(
+        "exec-1",
+        NativeEventKind.CONTEXT_RENDERED,
+        {"nested": {"items": [1]}},
+    )
+    with pytest.raises(TypeError):
+        event.payload["nested"]["items"].append(2)
+    assert event.payload["nested"]["items"] == [1]
+
+
 def test_event_payload_is_redacted_and_json_safe(tmp_path):
     class Payload(BaseModel):
         model_config = ConfigDict(extra="forbid", strict=True)

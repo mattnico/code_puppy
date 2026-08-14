@@ -37,6 +37,13 @@ class StateService:
         self.event_store = event_store
         self.schema_version = schema_version
         self.max_bytes = state_max_bytes() if max_bytes is None else max_bytes
+        config = getattr(state_type, "model_config", {})
+        if not (
+            isinstance(config, dict)
+            and config.get("extra") == "forbid"
+            and config.get("strict") is True
+        ):
+            raise StateSchemaError("native state type must be strict with extra=forbid")
         if self.schema_version < 1:
             raise StateSchemaError("state schema version must be positive")
         if self.max_bytes < 1:
@@ -75,6 +82,11 @@ class StateService:
         snapshot = self.state_store.get_state(self.execution_id)
         if snapshot is None:
             return None
+        if (
+            snapshot.schema_name != self.state_type.__name__
+            or snapshot.schema_version != self.schema_version
+        ):
+            raise StateSchemaError("stored state schema is not supported")
         try:
             return self.state_type.model_validate(snapshot.state_json)
         except ValidationError as exc:
@@ -107,6 +119,11 @@ class StateService:
         current = self.state_store.get_state(self.execution_id)
         if current is None:
             raise StateConflictError("native state has not been initialized")
+        if (
+            current.schema_name != self.state_type.__name__
+            or current.schema_version != self.schema_version
+        ):
+            raise StateSchemaError("stored state schema is not supported")
         if current.revision != expected_revision:
             raise StateConflictError(
                 f"expected state revision {expected_revision}, found {current.revision}"

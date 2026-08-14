@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .contracts import (
     EventQuery,
@@ -123,7 +123,7 @@ def redact_payload(value: Any) -> dict[str, JsonValue]:
         decoded = json.loads(encoded)
     except EventStoreError:
         raise
-    except Exception as exc:
+    except (TypeError, ValueError, ValidationError) as exc:
         raise EventStoreError("native payload is not JSON-compatible") from exc
     if not isinstance(decoded, dict):  # pragma: no cover - guarded above
         raise EventStoreError("native payload must be a JSON object")
@@ -132,7 +132,8 @@ def redact_payload(value: Any) -> dict[str, JsonValue]:
 
 def _event_from_row(row: sqlite3.Row, *, include_payload: bool = True) -> NativeEvent:
     try:
-        payload = json.loads(row["payload_json"])
+        raw_payload = json.loads(row["payload_json"])
+        safe_payload = redact_payload(raw_payload)
         return NativeEvent(
             event_id=row["event_id"],
             execution_id=row["execution_id"],
@@ -140,10 +141,10 @@ def _event_from_row(row: sqlite3.Row, *, include_payload: bool = True) -> Native
             schema_version=int(row["schema_version"]),
             kind=NativeEventKind(row["kind"]),
             occurred_at=parse_timestamp(row["occurred_at"]),
-            payload=payload if include_payload else {},
-            redacted=bool(row["redacted"]),
+            payload=safe_payload if include_payload else {},
+            redacted=bool(row["redacted"]) or safe_payload != raw_payload,
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, ValidationError, EventStoreError) as exc:
         raise EventStoreError("stored native event is invalid") from exc
 
 
@@ -335,12 +336,18 @@ class EventStore:
 class EventService:
     """Execution-owned query facade; cross-execution reads are impossible."""
 
+    __slots__ = ("_execution_id", "store")
+
     def __init__(self, execution_id: str, store: EventStore) -> None:
-        self.execution_id = execution_id
+        self._execution_id = execution_id
         self.store = store
 
+    @property
+    def execution_id(self) -> str:
+        return self._execution_id
+
     def query(self, query: EventQuery) -> list[NativeEvent]:
-        return self.store.query(self.execution_id, query)
+        return self.store.query(self._execution_id, query)
 
     def summaries(self, query: EventQuery) -> list[EventSummary]:
-        return self.store.summaries(self.execution_id, query)
+        return self.store.summaries(self._execution_id, query)

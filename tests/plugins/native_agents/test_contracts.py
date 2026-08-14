@@ -75,6 +75,21 @@ def test_models_round_trip_timezone_revision_and_schema():
     assert restored.created_at.tzinfo is not None
 
 
+def test_capability_names_require_namespaced_identifiers():
+    from code_puppy.plugins.native_agents.contracts import (
+        CapabilityEffect,
+        CapabilitySpec,
+    )
+
+    with pytest.raises(ValidationError):
+        CapabilitySpec(
+            name="read_file",
+            resource_type="search_results",
+            effect=CapabilityEffect.OBSERVE,
+            description="invalid namespace",
+        )
+
+
 def test_secret_field_metadata_is_allowed_on_strict_models():
     class State(BaseModel):
         model_config = ConfigDict(extra="forbid", strict=True)

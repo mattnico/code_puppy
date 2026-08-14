@@ -67,6 +67,58 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     ),
 )
 
+_REQUIRED_COLUMNS = {
+    "native_executions": {
+        "execution_id",
+        "agent_name",
+        "method_name",
+        "method_version",
+        "strategy",
+        "status",
+        "created_at",
+    },
+    "native_state_snapshots": {
+        "execution_id",
+        "revision",
+        "schema_name",
+        "schema_version",
+        "state_json",
+        "created_at",
+    },
+    "native_events": {
+        "event_id",
+        "execution_id",
+        "sequence",
+        "schema_version",
+        "kind",
+        "occurred_at",
+        "payload_json",
+        "redacted",
+    },
+}
+
+
+def _verify_schema(connection: sqlite3.Connection) -> None:
+    """Fail closed when a database is incomplete, future, or corrupt."""
+
+    applied = [
+        int(row[0])
+        for row in connection.execute(
+            "SELECT version FROM native_schema_migrations ORDER BY version"
+        ).fetchall()
+    ]
+    expected = list(range(1, LATEST_SCHEMA_VERSION + 1))
+    if applied != expected:
+        raise NativeStorageUnavailableError("native storage schema is unsupported")
+    integrity = connection.execute("PRAGMA integrity_check").fetchone()
+    if integrity is None or integrity[0] != "ok":
+        raise NativeStorageUnavailableError("native storage integrity check failed")
+    for table, required_columns in _REQUIRED_COLUMNS.items():
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        columns = {row[1] for row in rows}
+        if not required_columns.issubset(columns):
+            raise NativeStorageUnavailableError("native storage schema is incomplete")
+
 
 def utc_now() -> datetime:
     """Return an aware UTC timestamp for persisted records."""
@@ -144,6 +196,7 @@ def initialize_database(path: str | Path) -> None:
                     (version, timestamp(utc_now())),
                 )
             connection.commit()
+            _verify_schema(connection)
     except NativeStorageUnavailableError:
         raise
     except (OSError, sqlite3.Error, ValueError) as exc:

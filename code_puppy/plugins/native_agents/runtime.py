@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 import weakref
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from .context import ContextRenderer, render_context_text
 from .config import (
@@ -122,16 +125,6 @@ class NativeMethodRuntime:
             ),
             created_at=datetime.now(timezone.utc),
         )
-        state_store.create_execution(
-            identity,
-            method_version=spec.version,
-            strategy=spec.strategy,
-        )
-        event_store.append(
-            identity.execution_id,
-            NativeEventKind.EXECUTION_STARTED,
-            {"agent_name": identity.agent_name, "method_name": identity.method_name},
-        )
         references = ReferenceStore(event_store=event_store)
         capabilities = CapabilityRegistry(
             references=references,
@@ -140,87 +133,124 @@ class NativeMethodRuntime:
         register_search_result_capabilities(capabilities, references)
         event_service = EventService(identity.execution_id, event_store)
         state_service: StateService | None = None
-        if spec.state_type is not None:
-            try:
-                initial_state = (
-                    spec.state_factory(payload)
-                    if spec.state_factory is not None
-                    else spec.state_type()
+        execution_created = False
+        try:
+            state_store.create_execution(
+                identity,
+                method_version=spec.version,
+                strategy=spec.strategy,
+            )
+            execution_created = True
+            event_store.append(
+                identity.execution_id,
+                NativeEventKind.EXECUTION_STARTED,
+                {
+                    "agent_name": identity.agent_name,
+                    "method_name": identity.method_name,
+                },
+            )
+            if spec.state_type is not None:
+                try:
+                    initial_state = (
+                        spec.state_factory(payload)
+                        if spec.state_factory is not None
+                        else spec.state_type()
+                    )
+                    state_service = StateService(
+                        execution_id=identity.execution_id,
+                        state_type=spec.state_type,
+                        state_store=state_store,
+                        event_store=event_store,
+                        schema_version=spec.state_schema_version,
+                    )
+                    state_service.initialize(initial_state)
+                except Exception as exc:
+                    if isinstance(exc, StateSchemaError):
+                        raise
+                    raise StateSchemaError(
+                        "native state initialization failed"
+                    ) from exc
+            native_context = NativeExecutionContext(
+                identity=identity,
+                method=spec,
+                state=state_service,
+                events=event_service,
+                context=ContextRenderer(),
+                references=references,
+                capabilities=capabilities,
+            )
+            state_store.set_execution_status(
+                identity.execution_id, NativeExecutionStatus.RUNNING
+            )
+            execution = state_store.get_execution(identity.execution_id)
+            if execution is None:  # pragma: no cover - storage invariant
+                raise NativeStorageUnavailableError(
+                    "native execution record disappeared"
                 )
-                state_service = StateService(
-                    execution_id=identity.execution_id,
-                    state_type=spec.state_type,
-                    state_store=state_store,
-                    event_store=event_store,
-                    schema_version=spec.state_schema_version,
+            state_snapshot = state_store.get_state(identity.execution_id)
+            event_limit = spec.context_budget.max_events
+            event_summaries = (
+                event_store.recent_summaries(
+                    identity.execution_id,
+                    EventQuery(limit=max(1, event_limit)),
                 )
-                state_service.initialize(initial_state)
-            except Exception as exc:
-                state_error = (
-                    exc
-                    if isinstance(exc, StateSchemaError)
-                    else StateSchemaError("native state initialization failed")
-                )
-                await self._revoke_references(references, identity.execution_id)
-                return await self._fail(
+                if event_limit
+                else []
+            )
+            effective_budget = spec.context_budget.model_copy(
+                update={
+                    "max_chars": min(
+                        spec.context_budget.max_chars, context_max_chars()
+                    ),
+                    "max_events": min(
+                        spec.context_budget.max_events, event_max_per_view()
+                    ),
+                }
+            )
+            reference_items = await references.list_for_execution(
+                identity, limit=effective_budget.max_preview_items
+            )
+            context_view = ContextRenderer().render(
+                spec=spec,
+                execution=execution,
+                state=state_snapshot,
+                events=event_summaries,
+                budget=effective_budget,
+                references=reference_items,
+            )
+            event_store.append(
+                identity.execution_id,
+                NativeEventKind.CONTEXT_RENDERED,
+                {
+                    "total_chars": context_view.total_chars,
+                    "truncated": context_view.truncated,
+                    "blocks": [block.name for block in context_view.blocks],
+                },
+            )
+        except asyncio.CancelledError:
+            if execution_created:
+                await self._record_failure_best_effort(
                     state_store,
                     event_store,
                     identity,
-                    "state_initialization_failed",
-                    str(state_error),
-                    state_error,
+                    "cancelled",
+                    "native execution cancelled during setup",
+                    NativeExecutionStatus.CANCELLED,
                 )
-        native_context = NativeExecutionContext(
-            identity=identity,
-            method=spec,
-            state=state_service,
-            events=event_service,
-            context=ContextRenderer(),
-            references=references,
-            capabilities=capabilities,
-        )
-        state_store.set_execution_status(
-            identity.execution_id, NativeExecutionStatus.RUNNING
-        )
-        execution = state_store.get_execution(identity.execution_id)
-        if execution is None:  # pragma: no cover - storage invariant
-            raise NativeStorageUnavailableError("native execution record disappeared")
-        state_snapshot = state_store.get_state(identity.execution_id)
-        event_limit = spec.context_budget.max_events
-        event_summaries = (
-            event_store.recent_summaries(
-                identity.execution_id,
-                EventQuery(limit=max(1, event_limit)),
-            )
-            if event_limit
-            else []
-        )
-        effective_budget = spec.context_budget.model_copy(
-            update={
-                "max_chars": min(spec.context_budget.max_chars, context_max_chars()),
-                "max_events": min(spec.context_budget.max_events, event_max_per_view()),
-            }
-        )
-        reference_items = await references.list_for_execution(
-            identity, limit=effective_budget.max_preview_items
-        )
-        context_view = ContextRenderer().render(
-            spec=spec,
-            execution=execution,
-            state=state_snapshot,
-            events=event_summaries,
-            budget=effective_budget,
-            references=reference_items,
-        )
-        event_store.append(
-            identity.execution_id,
-            NativeEventKind.CONTEXT_RENDERED,
-            {
-                "total_chars": context_view.total_chars,
-                "truncated": context_view.truncated,
-                "blocks": [block.name for block in context_view.blocks],
-            },
-        )
+                await self._revoke_references(references, identity.execution_id)
+            raise
+        except Exception as exc:
+            if execution_created:
+                await self._record_failure_best_effort(
+                    state_store,
+                    event_store,
+                    identity,
+                    getattr(exc, "code", "native_setup_failed"),
+                    str(exc),
+                    NativeExecutionStatus.FAILED,
+                )
+                await self._revoke_references(references, identity.execution_id)
+            raise
 
         validation_event_recorded = False
 
@@ -244,10 +274,28 @@ class NativeMethodRuntime:
                     native_context=native_context,
                     on_validation_failure=record_validation_failure,
                 )
-            if not isinstance(result, spec.output_type):
+            if not isinstance(result, BaseModel):
+                raise NativeOutputValidationError(
+                    "native strategy returned a non-Pydantic output"
+                )
+            try:
+                validated_result = spec.output_type.model_validate(
+                    result.model_dump(mode="python")
+                )
+            except (TypeError, ValueError, ValidationError) as exc:
+                raise NativeOutputValidationError(
+                    "native strategy returned an invalid declared output"
+                ) from exc
+            if type(validated_result) is not spec.output_type:
                 raise NativeOutputValidationError(
                     "native strategy returned an invalid declared output"
                 )
+            try:
+                json.dumps(validated_result.model_dump(mode="json"), allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise NativeOutputValidationError(
+                    "native strategy returned a non-JSON output"
+                ) from exc
             state_store.set_execution_status(
                 identity.execution_id,
                 NativeExecutionStatus.FINISHED,
@@ -258,7 +306,7 @@ class NativeMethodRuntime:
                     ),
                 ),
             )
-            return result
+            return validated_result
         except asyncio.CancelledError:
             await self._record_failure(
                 state_store,
@@ -293,24 +341,28 @@ class NativeMethodRuntime:
         finally:
             await self._revoke_references(references, identity.execution_id)
 
-    async def _fail(
+    async def _record_failure_best_effort(
         self,
         state_store: StateStore,
         event_store: EventStore,
         identity: ExecutionIdentity,
         code: str,
         summary: str,
-        error: Exception,
-    ) -> Any:
-        await self._record_failure(
-            state_store,
-            event_store,
-            identity,
-            code,
-            summary,
-            NativeExecutionStatus.FAILED,
-        )
-        raise error
+        status: NativeExecutionStatus,
+    ) -> None:
+        try:
+            await self._record_failure(
+                state_store,
+                event_store,
+                identity,
+                code,
+                summary,
+                status,
+            )
+        except Exception:
+            # The original setup failure is more useful than a secondary
+            # storage/cleanup failure, and the feature remains fail-closed.
+            return
 
     async def _record_failure(
         self,

@@ -282,12 +282,14 @@ messages.
 
 ## Phase 6 ecosystem integration
 
-Tier A keeps Code Puppy's existing seams authoritative. PredictStrategy builds
-through `_builder.build_pydantic_agent`, receives the parent's model/tool/MCP
+Tier A keeps Code Puppy’s existing seams authoritative. PredictStrategy builds
+through `_builder.build_pydantic_agent`, receives the parent’s model/tool/MCP
 configuration, uses existing run contexts/lifecycle callbacks, and carries no
-parallel provider or MCP client. The DBOS adapter reports availability and
-launched state without importing/launching a second runtime; absent or
-not-launched DBOS is normal and safe.
+parallel provider or MCP client. The generic builder accepts an optional
+already-bound MCP snapshot; ordinary callers omit it, while native invocations
+use the parent snapshot and still get normal collision filtering. The DBOS
+adapter reports availability and launched state without importing/launching a
+second runtime; absent or not-launched DBOS is normal and safe.
 
 Kennel remains long-term memory, not native state. A method must opt in with
 `MethodSpec.memory_opt_in`; recall is bounded and duplicate content already in

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Callable
+from math import isfinite
+from typing import Any, Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import TypeAliasType
 
 JsonValue = TypeAliasType(
@@ -15,10 +17,86 @@ JsonValue = TypeAliasType(
 )
 
 
+class FrozenDict(dict[str, Any]):
+    """A JSON-shaped dict that cannot be mutated after construction."""
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("native JSON values are immutable")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable
+
+    def __ior__(self, other: Any):
+        self._immutable(other)
+        return self
+
+
+class FrozenList(list[Any]):
+    """A JSON-shaped list that cannot be mutated after construction."""
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("native JSON values are immutable")
+
+    __setitem__ = __delitem__ = append = clear = extend = insert = pop = remove = (
+        reverse
+    ) = sort = _immutable
+
+    def __iadd__(self, other: Any):
+        self._immutable(other)
+        return self
+
+    def __imul__(self, other: Any):
+        self._immutable(other)
+        return self
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return FrozenDict({str(key): _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return FrozenList(_freeze_json(item) for item in value)
+    return value
+
+
+def _validate_native_value(value: Any) -> Any:
+    """Reject values that cannot be represented as strict JSON safely."""
+
+    if isinstance(value, float) and not isfinite(value):
+        raise ValueError("native JSON values must contain finite numbers")
+    if isinstance(value, datetime) and (
+        value.tzinfo is None or value.utcoffset() is None
+    ):
+        raise ValueError("native timestamps must be timezone-aware")
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _validate_native_value(item)
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            _validate_native_value(item)
+    return value
+
+
 class _StrictModel(BaseModel):
     """Base for external and persisted native-agent data."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _validate_safe_values(cls, value: Any) -> Any:
+        return _validate_native_value(value)
+
+    def model_post_init(self, __context: Any) -> None:
+        for field_name in type(self).model_fields:
+            value = _validate_native_value(getattr(self, field_name, None))
+            if isinstance(value, (Mapping, list)):
+                object.__setattr__(self, field_name, _freeze_json(value))
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ):
+        copied = super().model_copy(update=update, deep=deep)
+        copied.model_post_init(None)
+        return copied
 
 
 class NativeStrategyName(str, Enum):
@@ -106,6 +184,13 @@ class NativeEvent(_StrictModel, frozen=True):
     payload: dict[str, JsonValue]
     redacted: bool = False
 
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        for field_name in type(self).model_fields:
+            value = getattr(self, field_name, None)
+            if isinstance(value, (Mapping, list)):
+                object.__setattr__(self, field_name, _freeze_json(value))
+
 
 class ContextBudget(_StrictModel, frozen=True):
     max_chars: int = Field(ge=256, le=100_000)
@@ -170,7 +255,7 @@ class CapabilitySpec(_StrictModel, frozen=True):
         arbitrary_types_allowed=True,
     )
 
-    name: str = Field(pattern=r"^[a-z][a-z0-9_.-]+$", max_length=200)
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$", max_length=200)
     resource_type: str = Field(min_length=1, max_length=200)
     effect: CapabilityEffect
     input_model: type[BaseModel] = BaseModel

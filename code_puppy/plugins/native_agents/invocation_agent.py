@@ -24,6 +24,13 @@ class NativeInvocationAgent(BaseAgent):
         self.method_spec = spec
         self._method_prompt = prompt
         self._parent_agent_name = parent.name
+        parent_mcp_servers = getattr(parent, "_mcp_servers", None)
+        self._parent_mcp_servers = (
+            None
+            if getattr(parent, "pydantic_agent", None) is None
+            and not parent_mcp_servers
+            else list(parent_mcp_servers or ())
+        )
         self.native_context = native_context
 
     @property

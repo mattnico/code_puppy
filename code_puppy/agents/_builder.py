@@ -566,6 +566,7 @@ def build_pydantic_agent(
     output_type: Any = str,
     message_group: Optional[str] = None,
     retries: int = 3,
+    mcp_servers: Optional[List[Any]] = None,
 ) -> Any:
     """Build (and wire up) the pydantic-ai agent for ``agent``.
 
@@ -582,6 +583,11 @@ def build_pydantic_agent(
     ``retries`` controls Pydantic AI's bounded output/tool validation retries;
     the default preserves existing behavior. It is intentionally generic so
     callers with a stricter typed contract can choose a smaller budget.
+
+    ``mcp_servers`` optionally supplies an already-bound server snapshot. When
+    omitted, the normal manager lookup is unchanged; callers that already own
+    a filtered runtime snapshot can avoid reloading configuration while still
+    using the builder's collision filtering.
 
     The build happens in two passes: we construct once with ``toolsets=[]`` so
     we can introspect registered tool names, then rebuild with MCP servers
@@ -602,7 +608,11 @@ def build_pydantic_agent(
         agent_name=getattr(agent, "name", None),
     )
     instructions = _assemble_instructions(agent, resolved_model_name)
-    mcp_servers = load_mcp_servers(agent_name=getattr(agent, "name", None))
+    mcp_servers = (
+        list(mcp_servers)
+        if mcp_servers is not None
+        else load_mcp_servers(agent_name=getattr(agent, "name", None))
+    )
     model_settings = make_model_settings(resolved_model_name)
     history_processor = make_history_processor(agent)
     steer_processor = make_steer_history_processor(agent)

@@ -30,6 +30,7 @@ def _initialize_if_enabled() -> None:
 
     global _STORAGE_READY
     if not is_enabled():
+        _STORAGE_READY = False
         return
     with _STORAGE_LOCK:
         if _STORAGE_READY:

@@ -14,6 +14,7 @@ from code_puppy.plugins.native_agents.demo_agent import (
     NativeReviewerAgent,
 )
 from code_puppy.plugins.native_agents.errors import (
+    EventStoreError,
     NativeOutputValidationError,
     NativeStorageUnavailableError,
 )
@@ -125,6 +126,39 @@ async def test_validation_failure_is_bounded_evented_and_typed(monkeypatch, tmp_
     ).get_execution(execution_id)
     assert record.status is NativeExecutionStatus.FAILED
     assert strategy.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_marks_created_execution_terminal(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.runtime.is_enabled", lambda: True
+    )
+
+    class FailingStartStore(EventStore):
+        def append(self, execution_id, kind, payload):
+            if kind is NativeEventKind.EXECUTION_STARTED:
+                raise EventStoreError("locked")
+            return super().append(execution_id, kind, payload)
+
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.runtime.EventStore", FailingStartStore
+    )
+    strategy = ReturningStrategy(_result())
+    runtime = NativeMethodRuntime(
+        db_path=tmp_path / "native.sqlite3", predict_strategy=strategy
+    )
+    agent = NativeReviewerAgent()
+    with pytest.raises(EventStoreError):
+        await runtime.execute(
+            agent,
+            agent.get_native_method("summarize_change"),
+            _input(),
+        )
+    record = StateStore(
+        str(tmp_path / "native.sqlite3"), initialize=False
+    ).get_execution(_find_execution_id(tmp_path))
+    assert record.status is NativeExecutionStatus.FAILED
+    assert strategy.calls == 0
 
 
 @pytest.mark.asyncio

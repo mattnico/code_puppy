@@ -52,8 +52,10 @@ async def test_invocation_adapter_owns_mutable_runtime_state():
     assert adapter.get_available_tools() == ["read_file"]
     assert "method prompt" in adapter.get_full_system_prompt()
     assert adapter._message_history == []
-    adapter._message_history.append("isolated")
+    assert adapter._mcp_servers == []
+    assert adapter._parent_mcp_servers == ["keep mcp"]
     adapter._mcp_servers.append("isolated mcp")
+    adapter._parent_mcp_servers.append("adapter-only mcp")
 
     assert parent._message_history == ["keep me"]
     assert parent._code_generation_agent is not None

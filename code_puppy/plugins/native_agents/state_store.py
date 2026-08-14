@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .contracts import (
     ExecutionIdentity,
@@ -17,6 +17,7 @@ from .contracts import (
     NativeStrategyName,
 )
 from .errors import (
+    EventStoreError,
     NativeStorageUnavailableError,
     StateConflictError,
     StateSchemaError,
@@ -30,9 +31,20 @@ from .storage import connect, initialize_database, parse_timestamp, timestamp, u
 StateModel = TypeVar("StateModel", bound=BaseModel)
 
 
+def _is_strict_model(model: BaseModel) -> bool:
+    config = getattr(type(model), "model_config", {})
+    return (
+        isinstance(config, dict)
+        and config.get("extra") == "forbid"
+        and config.get("strict") is True
+    )
+
+
 def _json_state(state: BaseModel) -> dict[str, Any]:
-    if not isinstance(state, BaseModel):
-        raise StateSchemaError("native state must be a Pydantic model")
+    if not isinstance(state, BaseModel) or not _is_strict_model(state):
+        raise StateSchemaError(
+            "native state must be a strict Pydantic model with extra=forbid"
+        )
     try:
         return redact_payload(state)
     except Exception as exc:
@@ -74,22 +86,24 @@ def _record_from_row(row: sqlite3.Row) -> NativeExecutionRecord:
             error_code=row["error_code"],
             error_summary=row["error_summary"],
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, ValidationError) as exc:
         raise StateSchemaError("stored native execution is invalid") from exc
 
 
 def _state_from_row(row: sqlite3.Row) -> NativeStateEnvelope:
     try:
+        raw_state = json.loads(row["state_json"])
+        state_json = redact_payload(raw_state)
         return NativeStateEnvelope(
             execution_id=row["execution_id"],
             schema_name=row["schema_name"],
             schema_version=int(row["schema_version"]),
             revision=int(row["revision"]),
-            state_json=json.loads(row["state_json"]),
+            state_json=state_json,
             created_at=parse_timestamp(row["created_at"]),
             updated_at=parse_timestamp(row["updated_at"]),
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, ValidationError, EventStoreError) as exc:
         raise StateSchemaError("stored native state is invalid") from exc
 
 
@@ -401,7 +415,7 @@ class StateStore:
                     )
                 revision = expected_revision + 1
                 initial_row = connection.execute(
-                    "SELECT created_at FROM native_state_snapshots "
+                    "SELECT created_at, schema_name, schema_version FROM native_state_snapshots "
                     "WHERE execution_id = ? AND revision = 1",
                     (execution_id,),
                 ).fetchone()
@@ -409,6 +423,11 @@ class StateStore:
                     raise StateSchemaError(
                         "native state is missing its initial snapshot"
                     )
+                if (
+                    initial_row[1] != schema_name
+                    or int(initial_row[2]) != schema_version
+                ):
+                    raise StateSchemaError("native state schema cannot drift")
                 created_at = parse_timestamp(initial_row[0])
                 connection.execute(
                     "INSERT INTO native_state_snapshots(execution_id, revision, "

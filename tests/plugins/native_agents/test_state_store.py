@@ -23,6 +23,10 @@ class State(BaseModel):
     token: str = Field(json_schema_extra={"secret": True})
 
 
+class LooseState(BaseModel):
+    count: int
+
+
 def _identity(execution_id: str = "exec-1") -> ExecutionIdentity:
     return ExecutionIdentity(
         execution_id=execution_id,
@@ -100,6 +104,43 @@ def test_execution_status_is_persisted(tmp_path):
     assert finished.status is NativeExecutionStatus.FAILED
     assert finished.error_code == "validation_failed"
     assert finished.finished_at is not None
+
+
+def test_corrupt_persisted_state_is_a_typed_failure(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "native.sqlite3"
+    store = StateStore(str(path))
+    record = store.create_execution(
+        _identity(), method_version=1, strategy=NativeStrategyName.PREDICT
+    )
+    store.initialize_state(
+        record.execution_id,
+        State(count=1, token="secret"),
+        schema_name="State",
+        schema_version=1,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE native_state_snapshots SET state_json = ?",
+            ("{malformed",),
+        )
+    with pytest.raises(StateSchemaError):
+        store.get_state(record.execution_id)
+
+
+def test_state_persistence_rejects_non_strict_models(tmp_path):
+    store = StateStore(str(tmp_path / "native.sqlite3"))
+    record = store.create_execution(
+        _identity(), method_version=1, strategy=NativeStrategyName.PREDICT
+    )
+    with pytest.raises(StateSchemaError):
+        store.initialize_state(
+            record.execution_id,
+            LooseState(count=1),
+            schema_name="LooseState",
+            schema_version=1,
+        )
 
 
 def test_state_requires_pydantic_json_object(tmp_path):

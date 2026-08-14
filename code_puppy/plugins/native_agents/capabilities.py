@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -85,17 +86,38 @@ class CapabilityRegistry:
             active_execution.execution_id != execution.execution_id
         ):
             raise CapabilityDeniedError("capability execution is not active")
-        spec, handler = self._capabilities.get(name, (None, None))
+        capability_name = name if isinstance(name, str) else "<invalid>"
+        supplied_id = (
+            handle.handle_id
+            if isinstance(handle, ReferenceHandle)
+            else handle
+            if isinstance(handle, str)
+            else "<invalid>"
+        )
+        hashed_id = handle_id_hash(supplied_id[:256])
+        spec, handler = self._capabilities.get(capability_name, (None, None))
         if spec is None or handler is None:
+            self._event(
+                execution.execution_id,
+                NativeEventKind.CAPABILITY_REQUESTED,
+                {
+                    "capability": capability_name[:200],
+                    "effect": "unknown",
+                    "handle_id_hash": hashed_id,
+                },
+            )
+            self._record_denial(
+                execution.execution_id,
+                capability_name[:200],
+                "unknown",
+                hashed_id,
+                "capability_unavailable",
+            )
             raise CapabilityNotFoundError("capability is unavailable")
         if not _strict_boundary_model(spec.input_model) or not _strict_boundary_model(
             spec.output_model
         ):
             raise CapabilityValidationError("capability models are not strict")
-        supplied_id = (
-            handle.handle_id if isinstance(handle, ReferenceHandle) else str(handle)
-        )
-        hashed_id = handle_id_hash(supplied_id)
         self._event(
             execution.execution_id,
             NativeEventKind.CAPABILITY_REQUESTED,
@@ -139,15 +161,12 @@ class CapabilityRegistry:
                 expected_type=spec.resource_type,
             )
         except HandleUnavailableError:
-            self._event(
+            self._record_denial(
                 execution.execution_id,
-                NativeEventKind.CAPABILITY_DENIED,
-                {
-                    "capability": spec.name,
-                    "effect": spec.effect.value,
-                    "handle_id_hash": hashed_id,
-                    "reason": "handle_unavailable",
-                },
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                "handle_unavailable",
             )
             raise
         decision = self.policy.authorize(
@@ -180,6 +199,20 @@ class CapabilityRegistry:
             validated_result = spec.output_model.model_validate(
                 result.model_dump(mode="python")
             )
+            try:
+                json.dumps(validated_result.model_dump(mode="json"), allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise CapabilityValidationError(
+                    "capability result is not JSON-compatible"
+                ) from exc
+            derived_handle = getattr(validated_result, "handle", None)
+            if isinstance(derived_handle, ReferenceHandle) and (
+                derived_handle.execution_id != execution.execution_id
+                or derived_handle.owner_session_id != execution.session_id
+            ):
+                raise CapabilityValidationError(
+                    "capability returned an out-of-scope handle"
+                )
         except CapabilityValidationError:
             self._event(
                 execution.execution_id,
@@ -222,7 +255,6 @@ class CapabilityRegistry:
             "outcome": "succeeded",
             "duration_ms": int((time.monotonic() - started) * 1000),
         }
-        derived_handle = getattr(validated_result, "handle", None)
         if isinstance(derived_handle, ReferenceHandle):
             completion_payload.update(
                 {

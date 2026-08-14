@@ -13,7 +13,10 @@ from .errors import NativeContractError
 def _schema_json(model: type[BaseModel], budget: int) -> str:
     try:
         rendered = json.dumps(
-            model.model_json_schema(), ensure_ascii=False, sort_keys=True
+            model.model_json_schema(),
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
         raise NativeContractError(
@@ -41,6 +44,7 @@ def build_method_prompt(
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
+            allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
         raise NativeContractError("native input is not JSON-compatible") from exc

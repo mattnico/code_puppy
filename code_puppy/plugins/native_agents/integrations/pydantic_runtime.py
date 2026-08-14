@@ -25,5 +25,6 @@ def build_isolated_invocation(parent_agent: Any, spec: MethodSpec, execution_id:
         output_type=spec.output_type,
         message_group=execution_id,
         retries=0,
+        mcp_servers=adapter._parent_mcp_servers,
     )
     return adapter, built

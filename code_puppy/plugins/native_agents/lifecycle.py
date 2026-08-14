@@ -5,13 +5,27 @@ from __future__ import annotations
 from .contracts import NativeExecutionStatus
 from .errors import NativeContractError
 
-_TERMINAL = frozenset(
-    {
-        NativeExecutionStatus.FINISHED,
-        NativeExecutionStatus.FAILED,
-        NativeExecutionStatus.CANCELLED,
-    }
-)
+_ALLOWED_TRANSITIONS = {
+    NativeExecutionStatus.CREATED: frozenset(
+        {
+            NativeExecutionStatus.CREATED,
+            NativeExecutionStatus.RUNNING,
+            NativeExecutionStatus.FAILED,
+            NativeExecutionStatus.CANCELLED,
+        }
+    ),
+    NativeExecutionStatus.RUNNING: frozenset(
+        {
+            NativeExecutionStatus.RUNNING,
+            NativeExecutionStatus.FINISHED,
+            NativeExecutionStatus.FAILED,
+            NativeExecutionStatus.CANCELLED,
+        }
+    ),
+    NativeExecutionStatus.FINISHED: frozenset({NativeExecutionStatus.FINISHED}),
+    NativeExecutionStatus.FAILED: frozenset({NativeExecutionStatus.FAILED}),
+    NativeExecutionStatus.CANCELLED: frozenset({NativeExecutionStatus.CANCELLED}),
+}
 
 
 def validate_transition(
@@ -19,10 +33,7 @@ def validate_transition(
 ) -> None:
     """Reject transitions that could make a durable record look successful."""
 
-    if current in _TERMINAL and requested is not current:
-        raise NativeContractError("terminal native executions cannot change status")
-    if (
-        requested is NativeExecutionStatus.FINISHED
-        and current is not NativeExecutionStatus.RUNNING
-    ):
-        raise NativeContractError("only running native executions can finish")
+    if requested not in _ALLOWED_TRANSITIONS.get(current, frozenset()):
+        raise NativeContractError(
+            f"invalid native execution transition: {current.value} -> {requested.value}"
+        )

@@ -14,6 +14,7 @@ from .config import (
     store_retention_days,
 )
 from .integrations import dbos
+from .errors import NativeStorageUnavailableError
 from .state_store import StateStore
 from .storage import LATEST_SCHEMA_VERSION, schema_version
 
@@ -64,7 +65,7 @@ def _cleanup() -> str:
             store_retention_days()
         )
     except Exception:
-        removed = 0
+        return t("native_agents.command.cleanup_unavailable")
     return t("native_agents.command.cleanup", count=removed)
 
 
@@ -82,7 +83,7 @@ def _diagnostics() -> str:
                 ]
             )
         ready = version == LATEST_SCHEMA_VERSION
-    except (OSError, sqlite3.Error, ValueError):
+    except (OSError, sqlite3.Error, ValueError, NativeStorageUnavailableError):
         pass
     kennel_enabled = False
     try:

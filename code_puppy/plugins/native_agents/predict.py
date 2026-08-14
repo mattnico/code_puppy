@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from pydantic_ai import UnexpectedModelBehavior, UsageLimits
 
@@ -78,6 +79,9 @@ class PredictStrategy:
             invocation_agent,
             output_type=spec.output_type,
             message_group=execution_id,
+            # Preserve the parent's already-bound MCP snapshot when one exists;
+            # the generic builder still performs collision filtering.
+            mcp_servers=invocation_agent._parent_mcp_servers,
             # Native repair attempts are explicit and therefore observable.
             # Leaving provider retries at zero prevents a hidden second budget.
             retries=0,
@@ -116,13 +120,28 @@ class PredictStrategy:
                             usage_limits=UsageLimits(request_limit=get_message_limit()),
                         )
                         output = result.output
-                        if not isinstance(output, spec.output_type):
+                        if not isinstance(output, BaseModel):
+                            raise NativeOutputValidationError(
+                                "native output was not a Pydantic model"
+                            )
+                        validated_output = spec.output_type.model_validate(
+                            output.model_dump(mode="python")
+                        )
+                        try:
+                            json.dumps(
+                                validated_output.model_dump(mode="json"),
+                                allow_nan=False,
+                            )
+                        except (TypeError, ValueError) as exc:
+                            raise NativeOutputValidationError(
+                                "native output is not JSON-compatible"
+                            ) from exc
+                        if type(validated_output) is not spec.output_type:
                             raise NativeOutputValidationError(
                                 "native output did not satisfy the declared schema"
                             )
-                        success = True
                         error = None
-                        return output
+                        return validated_output
                     except asyncio.CancelledError as exc:
                         error = exc
                         raise

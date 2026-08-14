@@ -45,6 +45,13 @@ def test_event_query_filters_kinds_and_omits_payload_by_default(tmp_path):
     assert summaries[0].occurred_at.tzinfo is not None
 
 
+def test_event_service_identity_cannot_be_retargeted(tmp_path):
+    store = _store(tmp_path)
+    service = EventService("exec-query", store)
+    with pytest.raises(AttributeError):
+        service.execution_id = "other"
+
+
 def test_event_query_rejects_unbounded_contracts():
     with pytest.raises(ValidationError):
         EventQuery(limit=0)
