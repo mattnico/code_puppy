@@ -34,7 +34,9 @@ class StateService:
         self.state_type = state_type
         self.state_store = state_store
         self.event_store = event_store
-        self.max_bytes = max_bytes or state_max_bytes()
+        self.max_bytes = state_max_bytes() if max_bytes is None else max_bytes
+        if self.max_bytes < 1:
+            raise StateSchemaError("native state size limit must be positive")
 
     def _validate(self, state: StateModel) -> StateModel:
         if not isinstance(state, self.state_type):

@@ -9,6 +9,7 @@ from .contracts import (
     CapabilitySpec,
     ExecutionIdentity,
     MethodSpec,
+    NativeStrategyName,
     ReferenceHandle,
 )
 
@@ -31,6 +32,10 @@ class CapabilityPolicy:
         if not is_enabled():
             return AuthorizationDecision(
                 allowed=False, reason="Capability is not permitted for this method."
+            )
+        if method.strategy is not NativeStrategyName.PREDICT:
+            return AuthorizationDecision(
+                allowed=False, reason="Capability strategy is not permitted."
             )
         if capability.name not in method.allowed_capabilities:
             return AuthorizationDecision(

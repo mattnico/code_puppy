@@ -46,11 +46,15 @@ def native_command_help():
     return [("native", t("native_agents.command.help"))]
 
 
+def _value(key: str) -> str:
+    return t(f"native_agents.value.{key}")
+
+
 def _status() -> str:
     return t(
         "native_agents.command.status",
-        enabled="on" if is_enabled() else "off",
-        codeact="on" if codeact_enabled() else "off",
+        enabled=_value("on" if is_enabled() else "off"),
+        codeact=_value("on" if codeact_enabled() else "off"),
     )
 
 
@@ -92,11 +96,11 @@ def _diagnostics() -> str:
     dbos_status = dbos.status()
     return t(
         "native_agents.command.diagnostics",
-        enabled="on" if is_enabled() else "off",
-        codeact="on" if codeact_enabled() else "off",
-        storage="ready" if ready else "unavailable",
+        enabled=_value("on" if is_enabled() else "off"),
+        codeact=_value("on" if codeact_enabled() else "off"),
+        storage=_value("ready" if ready else "unavailable"),
         schema_version=version,
         executions=executions,
-        dbos="launched" if dbos_status.get("launched") else "not launched",
-        kennel="on" if kennel_enabled else "off",
+        dbos=_value("launched" if dbos_status.get("launched") else "not_launched"),
+        kennel=_value("on" if kennel_enabled else "off"),
     )

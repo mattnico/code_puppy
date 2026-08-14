@@ -20,8 +20,11 @@ from .contracts import (
 )
 
 _SECRET_NAME = re.compile(
-    r"(?:token|secret|password|credential|authorization|private[_-]?key)", re.I
+    r"(?:api[_-]?key|access[_-]?token|token|secret|password|credential|"
+    r"authorization|private[_-]?key)",
+    re.I,
 )
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class ContextRenderer:
@@ -75,6 +78,21 @@ class ContextRenderer:
                 blocks.append(state_block)
         event_items = list(events)[: budget.max_events]
         if event_items:
+            validation_events = [
+                event
+                for event in event_items
+                if event.kind.value == "validation_failed"
+            ]
+            if validation_events:
+                blocks.append(
+                    self._block(
+                        "validation_feedback",
+                        95,
+                        self._event_line(validation_events[-1]),
+                        "events",
+                        budget.max_chars,
+                    )
+                )
             blocks.append(
                 self._block(
                     "recent_events",
@@ -113,16 +131,27 @@ class ContextRenderer:
             content = block.content
             block_truncated = block.truncated
             if len(rendered_block) > remaining:
-                marker = "\n[context truncated; retrieve approved bounded data]"
+                marker = "\n[context truncated]"
                 heading = f"## {block.name}\n"
                 content_budget = remaining - len(heading)
-                if content_budget <= 0:
+                if content_budget < len(marker):
+                    if selected:
+                        previous = selected[-1]
+                        trim = len(marker) - max(content_budget, 0)
+                        kept = max(0, len(previous.content) - trim)
+                        selected[-1] = previous.model_copy(
+                            update={
+                                "content": previous.content[:kept] + marker,
+                                "truncated": True,
+                            }
+                        )
+                        used = sum(
+                            len(_render_block(item)) + (2 if index else 0)
+                            for index, item in enumerate(selected)
+                        )
                     view_truncated = True
                     break
-                if content_budget < len(marker):
-                    content = marker[:content_budget]
-                else:
-                    content = content[: content_budget - len(marker)] + marker
+                content = content[: content_budget - len(marker)] + marker
                 block_truncated = True
                 view_truncated = True
                 rendered_block = _render_block(
@@ -140,6 +169,29 @@ class ContextRenderer:
                 break
         if len(selected) < len(blocks):
             view_truncated = True
+        if (
+            view_truncated
+            and selected
+            and not any("context truncated" in block.content for block in selected)
+        ):
+            marker = "[context truncated]"
+            last = selected[-1]
+            without_last = used - len(_render_block(last))
+            separator = 2 if len(selected) > 1 else 0
+            content_budget = budget.max_chars - without_last - separator
+            heading = len(f"## {last.name}\n")
+            available_content = max(0, content_budget - heading)
+            if available_content >= len(marker):
+                content = last.content[: available_content - len(marker)] + marker
+            else:
+                content = marker[:available_content]
+            selected[-1] = last.model_copy(
+                update={"content": content, "truncated": True}
+            )
+            used = sum(
+                len(_render_block(item)) + (2 if index else 0)
+                for index, item in enumerate(selected)
+            )
         return NativeContextView(
             execution_id=execution.execution_id,
             blocks=selected,
@@ -199,15 +251,17 @@ class ContextRenderer:
             if name.startswith(reference.resource_type + ".")
         ]
         allowed = ", ".join(operations) if operations else "none"
+        title = _CONTROL_RE.sub(" ", reference.preview.title).replace("\n", " ")
         return (
-            f"- {reference.preview.title!r}: {(reference.preview.count or 0):,} "
+            f"- {title!r}: {(reference.preview.count or 0):,} "
             f"items; sample={len(reference.preview.sample)}. "
             f"Allowed operations: {allowed}. This is a bounded preview, not the full data set."
         )
 
     @staticmethod
     def _event_line(event: EventSummary) -> str:
-        return f"{event.sequence}: {event.kind.value} — {event.summary}"
+        summary = _CONTROL_RE.sub(" ", event.summary).replace("\n", " ")
+        return f"{event.sequence}: {event.kind.value} — {summary[:500]}"
 
 
 def _render_block(block: ContextBlock) -> str:

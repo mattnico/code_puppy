@@ -16,7 +16,7 @@ from .contracts import (
     ReferencePreview,
 )
 from .errors import HandleUnavailableError
-from .events import EventStore
+from .events import EventStore, redact_payload
 
 _DEFAULT_TTL = timedelta(minutes=30)
 
@@ -62,6 +62,7 @@ class ReferenceStore:
         expiry = now + (ttl or self.default_ttl)
         if expiry <= now or expiry - now > timedelta(hours=2):
             raise ValueError("reference TTL must be positive and bounded")
+        safe_preview = ReferencePreview.model_validate(redact_payload(preview))
         handle = ReferenceHandle(
             handle_id=secrets.token_urlsafe(32),
             resource_type=resource_type,
@@ -69,7 +70,7 @@ class ReferenceStore:
             owner_session_id=execution.session_id,
             created_at=now,
             expires_at=expiry,
-            preview=preview,
+            preview=safe_preview,
         )
         async with self._lock:
             expired = await self._purge_expired_locked(now)
@@ -84,7 +85,7 @@ class ReferenceStore:
                     "resource_type": resource_type,
                     "handle_id_hash": handle_id_hash(handle.handle_id),
                     "expires_at": handle.expires_at.isoformat(),
-                    "preview_count": preview.count,
+                    "preview_count": safe_preview.count,
                 },
                 strict=True,
             )

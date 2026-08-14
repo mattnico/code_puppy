@@ -184,15 +184,24 @@ class CapabilityRegistry:
                 },
             )
             raise CapabilityValidationError("capability invocation failed") from exc
+        completion_payload = {
+            "capability": spec.name,
+            "handle_id_hash": hashed_id,
+            "outcome": "succeeded",
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        derived_handle = getattr(validated_result, "handle", None)
+        if isinstance(derived_handle, ReferenceHandle):
+            completion_payload.update(
+                {
+                    "derived_handle_id_hash": handle_id_hash(derived_handle.handle_id),
+                    "parent_handle_id_hash": hashed_id,
+                }
+            )
         self._event(
             execution.execution_id,
             NativeEventKind.CAPABILITY_COMPLETED,
-            {
-                "capability": spec.name,
-                "handle_id_hash": hashed_id,
-                "outcome": "succeeded",
-                "duration_ms": int((time.monotonic() - started) * 1000),
-            },
+            completion_payload,
         )
         return validated_result
 

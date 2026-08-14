@@ -5,6 +5,8 @@ registering callbacks at import time. The callback entry point lives in
 ``register_callbacks.py`` and is intentionally disabled by default.
 """
 
+from .capabilities import CapabilityRegistry
+from .capability_policy import CapabilityPolicy
 from .contracts import (
     AuthorizationDecision,
     CapabilityEffect,
@@ -34,7 +36,6 @@ from .contracts import (
     SearchResultSet,
     SearchSampleRequest,
 )
-from .events import EventService, EventStore
 from .errors import (
     CapabilityDeniedError,
     CapabilityNotFoundError,
@@ -49,12 +50,20 @@ from .errors import (
     StateConflictError,
     StateSchemaError,
 )
+from .events import EventService, EventStore
+from .method import NativeAgentMixin, native_method
+from .predict import PredictStrategy
+from .reference_store import ReferenceStore
+from .runtime import NativeMethodRuntime
+from .state import StateService
 
 __all__ = [
     "AuthorizationDecision",
     "CapabilityDeniedError",
     "CapabilityEffect",
     "CapabilityNotFoundError",
+    "CapabilityPolicy",
+    "CapabilityRegistry",
     "CapabilitySpec",
     "CapabilityValidationError",
     "ContextBlock",
@@ -68,18 +77,22 @@ __all__ = [
     "HandleUnavailableError",
     "MethodSpec",
     "NativeAgentError",
+    "NativeAgentMixin",
     "NativeContractError",
     "NativeEvent",
     "NativeEventKind",
     "NativeExecutionRecord",
     "NativeExecutionStatus",
+    "NativeMethodRuntime",
     "NativeOutputValidationError",
     "NativeRuntimeDisabledError",
     "NativeStateEnvelope",
     "NativeStorageUnavailableError",
     "NativeStrategyName",
+    "PredictStrategy",
     "ReferenceHandle",
     "ReferencePreview",
+    "ReferenceStore",
     "SearchCountRequest",
     "SearchCounts",
     "SearchHandleResult",
@@ -92,4 +105,6 @@ __all__ = [
     "SearchSampleRequest",
     "StateConflictError",
     "StateSchemaError",
+    "StateService",
+    "native_method",
 ]

@@ -30,7 +30,7 @@ from .storage import (
 
 _SECRET_KEY_RE = re.compile(
     r"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|credential|password|"
-    r"private[_-]?key|secret|session[_-]?cookie|refresh[_-]?token)",
+    r"private[_-]?key|client[_-]?secret|secret|session[_-]?cookie|refresh[_-]?token)",
     re.IGNORECASE,
 )
 _SECRET_VALUE_RE = re.compile(
@@ -47,7 +47,46 @@ def _is_secret_field(field_info: Any) -> bool:
     return isinstance(extra, Mapping) and extra.get("secret") is True
 
 
+def _redact_model_mapping(serialized: Any, original: BaseModel) -> Any:
+    """Apply field metadata while recursively redacting nested models."""
+
+    if not isinstance(serialized, Mapping):
+        return _redact_value(serialized)
+    fields = getattr(type(original), "model_fields", {})
+    result: dict[str, Any] = {}
+    for key, item in serialized.items():
+        name = str(key)
+        field_info = fields.get(name)
+        if field_info is not None and _is_secret_field(field_info):
+            result[name] = _REDACTED
+            continue
+        original_item = getattr(original, name, None)
+        result[name] = _redact_with_original(item, original_item)
+    return result
+
+
+def _redact_with_original(serialized: Any, original: Any) -> Any:
+    if isinstance(original, BaseModel):
+        return _redact_model_mapping(serialized, original)
+    if (
+        isinstance(original, Sequence)
+        and not isinstance(original, (str, bytes, bytearray))
+        and isinstance(serialized, Sequence)
+        and not isinstance(serialized, (str, bytes, bytearray))
+    ):
+        return [
+            _redact_with_original(item, source)
+            for item, source in zip(serialized, original)
+        ]
+    return _redact_value(serialized)
+
+
 def _redact_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        try:
+            return _redact_model_mapping(value.model_dump(mode="json"), value)
+        except Exception as exc:
+            raise EventStoreError("native payload is not JSON-compatible") from exc
     if isinstance(value, Mapping):
         return {
             str(key): (
@@ -63,21 +102,21 @@ def _redact_value(value: Any) -> Any:
 
 
 def redact_payload(value: Any) -> dict[str, JsonValue]:
-    """Return a strict JSON-compatible mapping with secrets redacted."""
+    """Return a strict JSON-compatible mapping with nested secrets redacted."""
 
-    if isinstance(value, BaseModel):
-        raw = value.model_dump(mode="json")
-        for name, field_info in value.__class__.model_fields.items():
-            if _is_secret_field(field_info) and name in raw:
-                raw[name] = _REDACTED
-        value = raw
-    if not isinstance(value, Mapping):
-        raise EventStoreError("native payload must be a mapping")
-    redacted = _redact_value(value)
     try:
+        if isinstance(value, BaseModel):
+            serialized = value.model_dump(mode="json")
+            redacted = _redact_model_mapping(serialized, value)
+        elif isinstance(value, Mapping):
+            redacted = _redact_value(value)
+        else:
+            raise EventStoreError("native payload must be a mapping")
         encoded = json.dumps(redacted, ensure_ascii=False, allow_nan=False)
         decoded = json.loads(encoded)
-    except (TypeError, ValueError) as exc:
+    except EventStoreError:
+        raise
+    except Exception as exc:
         raise EventStoreError("native payload is not JSON-compatible") from exc
     if not isinstance(decoded, dict):  # pragma: no cover - guarded above
         raise EventStoreError("native payload must be a JSON object")
@@ -129,9 +168,14 @@ def append_event_on_connection(
     """Append one event using the caller's active transaction."""
 
     redacted_payload = redact_payload(payload)
+    if isinstance(payload, BaseModel):
+        original_payload = payload.model_dump(mode="json")
+    else:
+        original_payload = dict(payload)
     encoded = json.dumps(
         redacted_payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     )
+
     row = connection.execute(
         "SELECT COALESCE(MAX(sequence), 0) + 1 FROM native_events "
         "WHERE execution_id = ?",
@@ -145,9 +189,7 @@ def append_event_on_connection(
         kind=kind,
         occurred_at=occurred_at or utc_now(),
         payload=redacted_payload,
-        redacted=redacted_payload != dict(payload)
-        if isinstance(payload, Mapping)
-        else True,
+        redacted=redacted_payload != original_payload,
     )
     connection.execute(
         "INSERT INTO native_events(event_id, execution_id, sequence, kind, "
@@ -180,7 +222,7 @@ class EventStore:
     ) -> NativeEvent:
         try:
             with connect(self.path) as connection:
-                connection.execute("BEGIN")
+                connection.execute("BEGIN IMMEDIATE")
                 event = append_event_on_connection(
                     connection, execution_id, kind, payload
                 )

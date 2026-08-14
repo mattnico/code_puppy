@@ -168,15 +168,17 @@ Phase 2 adds the explicit `@native_method` declaration, `NativeAgentMixin`,
 an ephemeral `NativeInvocationAgent`, and `NativeMethodRuntime`. A
 prediction accepts exactly one Pydantic input model and returns exactly the
 declared Pydantic output model. Declarations must be `async`, have a stub body,
-match their input/return annotations, and declare no capabilities. `codeact` is
-rejected rather than silently treated as prediction.
+match their input/return annotations, and may declare only the read-only
+capabilities introduced in Phase 4. `codeact` is rejected rather than silently
+treated as prediction.
 
 The invocation adapter delegates stable model/tool/MCP configuration to the
 parent but owns history, builder fields, identity, and transient resources.
-Calls on one parent are serialized by a runtime-local lock. The builder's new
-generic `retries` argument is the smallest core seam needed to make the
-method's bounded validation-repair setting truthful; its default remains the
-existing value of three and it contains no native-agent knowledge.
+Calls on one parent are serialized by a runtime-local lock. The native
+strategy sets provider validation retries to zero and owns an explicit,
+evented repair budget from `max_validation_repairs`; its default remains one
+repair attempt. The builder's `retries` argument is a small generic core seam
+and its ordinary-agent default remains three.
 
 The opt-in `native-reviewer` agent is registered only while
 `native_agents_enabled` is truthy. Its `summarize_change` method returns
@@ -196,9 +198,10 @@ untracked documentation remains intentionally untouched.
 ## Phase 3 durable context
 
 Phase 3 adds `StateService` for declared Pydantic state. Replacements validate
-the exact state type, enforce a bounded serialized byte size, require a stable
-developer-authored reason identifier, compare the expected revision before the
-write, and append a changed-field summary atomically with the new snapshot.
+the exact state type, enforce a bounded serialized byte size at both the service
+and storage boundaries, require a stable developer-authored reason identifier,
+compare the expected revision before the write, and append a changed-field
+summary atomically with the new snapshot.
 State is still JSON-only and redacted; it is never a transcript or provider
 object.
 

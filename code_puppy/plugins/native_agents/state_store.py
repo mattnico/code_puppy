@@ -16,8 +16,13 @@ from .contracts import (
     NativeStateEnvelope,
     NativeStrategyName,
 )
-from .errors import StateConflictError, StateSchemaError
+from .errors import (
+    NativeStorageUnavailableError,
+    StateConflictError,
+    StateSchemaError,
+)
 from .contracts import NativeEventKind
+from .config import state_max_bytes
 from .events import append_event_on_connection, redact_payload
 from .lifecycle import validate_transition
 from .storage import connect, initialize_database, parse_timestamp, timestamp, utc_now
@@ -34,6 +39,18 @@ def _json_state(state: BaseModel) -> dict[str, Any]:
         if isinstance(exc, StateSchemaError):
             raise
         raise StateSchemaError("native state must be JSON-compatible") from exc
+
+
+def _encode_state(state_json: dict[str, Any], max_bytes: int) -> str:
+    try:
+        encoded = json.dumps(
+            state_json, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        )
+    except (TypeError, ValueError) as exc:
+        raise StateSchemaError("native state must be JSON-compatible") from exc
+    if len(encoded.encode("utf-8")) > max_bytes:
+        raise StateSchemaError("native state exceeds its serialized size limit")
+    return encoded
 
 
 def _record_from_row(row: sqlite3.Row) -> NativeExecutionRecord:
@@ -79,8 +96,19 @@ def _state_from_row(row: sqlite3.Row) -> NativeStateEnvelope:
 class StateStore:
     """SQLite-backed execution records and optimistic state snapshots."""
 
-    def __init__(self, path: str, *, initialize: bool = True) -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        initialize: bool = True,
+        max_state_bytes: int | None = None,
+    ) -> None:
         self.path = path
+        self.max_state_bytes = (
+            state_max_bytes() if max_state_bytes is None else max_state_bytes
+        )
+        if self.max_state_bytes < 1:
+            raise StateSchemaError("native state size limit must be positive")
         if initialize:
             initialize_database(path)
 
@@ -105,7 +133,7 @@ class StateStore:
         )
         try:
             with connect(self.path) as connection:
-                connection.execute("BEGIN")
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     "INSERT INTO native_executions(execution_id, agent_name, "
                     "method_name, method_version, strategy, session_id, "
@@ -126,6 +154,10 @@ class StateStore:
             return record
         except sqlite3.IntegrityError as exc:
             raise StateSchemaError("native execution already exists") from exc
+        except sqlite3.Error as exc:
+            raise NativeStorageUnavailableError(
+                "native execution write failed"
+            ) from exc
 
     def get_execution(self, execution_id: str) -> NativeExecutionRecord | None:
         with connect(self.path) as connection:
@@ -156,19 +188,29 @@ class StateStore:
             else None
         )
         with connect(self.path) as connection:
-            connection.execute("BEGIN")
+            connection.execute("BEGIN IMMEDIATE")
             current_row = connection.execute(
-                "SELECT status FROM native_executions WHERE execution_id = ?",
+                "SELECT status, started_at, finished_at FROM native_executions "
+                "WHERE execution_id = ?",
                 (execution_id,),
             ).fetchone()
             if current_row is None:
                 raise StateSchemaError("native execution does not exist")
+            current_status = NativeExecutionStatus(current_row[0])
             try:
-                validate_transition(NativeExecutionStatus(current_row[0]), status)
+                validate_transition(current_status, status)
             except ValueError as exc:
                 raise StateSchemaError(
                     "stored native execution status is invalid"
                 ) from exc
+            if current_status is NativeExecutionStatus.RUNNING:
+                started_at = current_row[1]
+            if current_status in {
+                NativeExecutionStatus.FINISHED,
+                NativeExecutionStatus.FAILED,
+                NativeExecutionStatus.CANCELLED,
+            }:
+                finished_at = current_row[2]
             result = connection.execute(
                 "UPDATE native_executions SET status = ?, started_at = COALESCE(?, started_at), "
                 "finished_at = COALESCE(?, finished_at), error_code = ?, error_summary = ? "
@@ -212,7 +254,7 @@ class StateStore:
         )
         placeholders = ",".join("?" for _ in terminal)
         with connect(self.path) as connection:
-            connection.execute("BEGIN")
+            connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
                 "SELECT execution_id FROM native_executions "
                 f"WHERE status IN ({placeholders}) AND created_at < ?",
@@ -246,9 +288,7 @@ class StateStore:
             raise StateSchemaError("state schema version must be positive")
         state_json = _json_state(state)
         now = utc_now()
-        encoded = json.dumps(
-            state_json, ensure_ascii=False, allow_nan=False, separators=(",", ":")
-        )
+        encoded = _encode_state(state_json, self.max_state_bytes)
         envelope = NativeStateEnvelope(
             execution_id=execution_id,
             schema_name=schema_name,
@@ -258,28 +298,33 @@ class StateStore:
             created_at=now,
             updated_at=now,
         )
-        with connect(self.path) as connection:
-            connection.execute("BEGIN")
-            connection.execute(
-                "INSERT INTO native_state_snapshots(execution_id, revision, schema_name, "
-                "schema_version, state_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (
+        try:
+            with connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO native_state_snapshots(execution_id, revision, schema_name, "
+                    "schema_version, state_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        execution_id,
+                        1,
+                        schema_name,
+                        schema_version,
+                        encoded,
+                        timestamp(now),
+                    ),
+                )
+                append_event_on_connection(
+                    connection,
                     execution_id,
-                    1,
-                    schema_name,
-                    schema_version,
-                    encoded,
-                    timestamp(now),
-                ),
-            )
-            append_event_on_connection(
-                connection,
-                execution_id,
-                NativeEventKind.STATE_INITIALIZED,
-                {"revision": 1, "schema_name": schema_name},
-                occurred_at=now,
-            )
-            connection.commit()
+                    NativeEventKind.STATE_INITIALIZED,
+                    {"revision": 1, "schema_name": schema_name},
+                    occurred_at=now,
+                )
+                connection.commit()
+        except sqlite3.IntegrityError as exc:
+            raise StateSchemaError("native state initialization failed") from exc
+        except sqlite3.Error as exc:
+            raise NativeStorageUnavailableError("native state write failed") from exc
         return envelope
 
     def get_state(self, execution_id: str) -> NativeStateEnvelope | None:
@@ -311,53 +356,65 @@ class StateStore:
             raise StateSchemaError("state revision and schema version must be positive")
         state_json = _json_state(state)
         now = utc_now()
-        encoded = json.dumps(
-            state_json, ensure_ascii=False, allow_nan=False, separators=(",", ":")
-        )
-        with connect(self.path) as connection:
-            connection.execute("BEGIN")
-            row = connection.execute(
-                "SELECT revision FROM native_state_snapshots WHERE execution_id = ? "
-                "ORDER BY revision DESC LIMIT 1",
-                (execution_id,),
-            ).fetchone()
-            current_revision = int(row[0]) if row else None
-            if current_revision != expected_revision:
-                raise StateConflictError(
-                    f"expected state revision {expected_revision}, "
-                    f"found {current_revision}"
+        encoded = _encode_state(state_json, self.max_state_bytes)
+        try:
+            with connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT revision FROM native_state_snapshots "
+                    "WHERE execution_id = ? ORDER BY revision DESC LIMIT 1",
+                    (execution_id,),
+                ).fetchone()
+                current_revision = int(row[0]) if row else None
+                if current_revision != expected_revision:
+                    raise StateConflictError(
+                        f"expected state revision {expected_revision}, "
+                        f"found {current_revision}"
+                    )
+                revision = expected_revision + 1
+                initial_row = connection.execute(
+                    "SELECT created_at FROM native_state_snapshots "
+                    "WHERE execution_id = ? AND revision = 1",
+                    (execution_id,),
+                ).fetchone()
+                if initial_row is None:
+                    raise StateSchemaError(
+                        "native state is missing its initial snapshot"
+                    )
+                created_at = parse_timestamp(initial_row[0])
+                connection.execute(
+                    "INSERT INTO native_state_snapshots(execution_id, revision, "
+                    "schema_name, schema_version, state_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        execution_id,
+                        revision,
+                        schema_name,
+                        schema_version,
+                        encoded,
+                        timestamp(now),
+                    ),
                 )
-            revision = expected_revision + 1
-            connection.execute(
-                "INSERT INTO native_state_snapshots(execution_id, revision, schema_name, "
-                "schema_version, state_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (
+                append_event_on_connection(
+                    connection,
                     execution_id,
-                    revision,
-                    schema_name,
-                    schema_version,
-                    encoded,
-                    timestamp(now),
-                ),
-            )
-            append_event_on_connection(
-                connection,
-                execution_id,
-                NativeEventKind.STATE_UPDATED,
-                event_payload
-                or {
-                    "revision": revision,
-                    "schema_name": schema_name,
-                },
-                occurred_at=now,
-            )
-            connection.commit()
+                    NativeEventKind.STATE_UPDATED,
+                    event_payload or {"revision": revision, "schema_name": schema_name},
+                    occurred_at=now,
+                )
+                connection.commit()
+        except (StateConflictError, StateSchemaError):
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise StateSchemaError("native state update failed") from exc
+        except sqlite3.Error as exc:
+            raise NativeStorageUnavailableError("native state write failed") from exc
         return NativeStateEnvelope(
             execution_id=execution_id,
             schema_name=schema_name,
             schema_version=schema_version,
             revision=revision,
             state_json=state_json,
-            created_at=now,
+            created_at=created_at,
             updated_at=now,
         )

@@ -12,7 +12,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from .context import ContextRenderer, render_context_text
-from .config import database_path, is_enabled
+from .config import (
+    context_max_chars,
+    database_path,
+    event_max_per_view,
+    is_enabled,
+)
 from .contracts import (
     EventQuery,
     ExecutionIdentity,
@@ -28,7 +33,7 @@ from .errors import (
     NativeStorageUnavailableError,
     StateSchemaError,
 )
-from .events import EventStore
+from .events import EventStore, redact_payload
 from .execution import current_execution, execution_scope
 from .predict import PredictStrategy
 from .state_store import StateStore
@@ -148,11 +153,18 @@ class NativeMethodRuntime:
             if event_limit
             else []
         )
+        effective_budget = spec.context_budget.model_copy(
+            update={
+                "max_chars": min(spec.context_budget.max_chars, context_max_chars()),
+                "max_events": min(spec.context_budget.max_events, event_max_per_view()),
+            }
+        )
         context_view = ContextRenderer().render(
             spec=spec,
             execution=execution,
             state=state_snapshot,
             events=event_summaries,
+            budget=effective_budget,
         )
         event_store.append(
             identity.execution_id,
@@ -164,6 +176,17 @@ class NativeMethodRuntime:
             },
         )
 
+        validation_event_recorded = False
+
+        def record_validation_failure(attempt: int, error_code: str):
+            nonlocal validation_event_recorded
+            validation_event_recorded = True
+            return event_store.append(
+                identity.execution_id,
+                NativeEventKind.VALIDATION_FAILED,
+                {"attempt": attempt, "error_code": error_code},
+            )
+
         try:
             async with execution_scope(identity):
                 result = await self.predict_strategy.execute(
@@ -172,6 +195,7 @@ class NativeMethodRuntime:
                     payload,
                     execution_id=identity.execution_id,
                     context_text=render_context_text(context_view),
+                    on_validation_failure=record_validation_failure,
                 )
         except asyncio.CancelledError:
             await self._record_failure(
@@ -191,7 +215,7 @@ class NativeMethodRuntime:
                 exc.code,
                 str(exc),
                 NativeExecutionStatus.FAILED,
-                validation_failed=True,
+                validation_failed=not validation_event_recorded,
             )
             raise
         except Exception as exc:
@@ -246,20 +270,23 @@ class NativeMethodRuntime:
         validation_failed: bool = False,
     ) -> None:
         bounded_summary = str(summary).replace("\n", " ")[:500]
+        safe_summary = redact_payload({"summary": bounded_summary})["summary"]
+        if not isinstance(safe_summary, str):
+            safe_summary = "native execution failed"
         if validation_failed:
             event_store.append(
                 identity.execution_id,
                 NativeEventKind.VALIDATION_FAILED,
-                {"error_code": code, "summary": bounded_summary},
+                {"error_code": code, "summary": safe_summary},
             )
         state_store.set_execution_status(
             identity.execution_id,
             status,
             error_code=code,
-            error_summary=bounded_summary,
+            error_summary=safe_summary,
         )
         event_store.append(
             identity.execution_id,
             NativeEventKind.EXECUTION_FAILED,
-            {"error_code": code, "summary": bounded_summary, "status": status.value},
+            {"error_code": code, "summary": safe_summary, "status": status.value},
         )
