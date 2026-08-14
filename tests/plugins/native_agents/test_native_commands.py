@@ -3,8 +3,8 @@ from code_puppy.plugins.native_agents import commands
 
 def test_native_commands_are_feature_gated_and_namespaced(monkeypatch):
     monkeypatch.setattr(commands, "is_enabled", lambda: False)
-    assert commands.handle_native_command("/native status", "native") == commands.t(
-        "native_agents.command.disabled"
+    assert commands.handle_native_command("/native status", "native") == (
+        "Native agents are disabled."
     )
     assert commands.handle_native_command("/other status", "other") is None
     assert commands.native_command_help() == []
