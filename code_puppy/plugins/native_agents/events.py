@@ -137,6 +137,7 @@ def _event_from_row(row: sqlite3.Row, *, include_payload: bool = True) -> Native
             event_id=row["event_id"],
             execution_id=row["execution_id"],
             sequence=int(row["sequence"]),
+            schema_version=int(row["schema_version"]),
             kind=NativeEventKind(row["kind"]),
             occurred_at=parse_timestamp(row["occurred_at"]),
             payload=payload if include_payload else {},
@@ -193,18 +194,20 @@ def append_event_on_connection(
         event_id=str(uuid.uuid4()),
         execution_id=execution_id,
         sequence=sequence,
+        schema_version=1,
         kind=kind,
         occurred_at=occurred_at or utc_now(),
         payload=redacted_payload,
         redacted=redacted_payload != original_payload,
     )
     connection.execute(
-        "INSERT INTO native_events(event_id, execution_id, sequence, kind, "
-        "occurred_at, payload_json, redacted) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO native_events(event_id, execution_id, sequence, schema_version, kind, "
+        "occurred_at, payload_json, redacted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             event.event_id,
             event.execution_id,
             event.sequence,
+            event.schema_version,
             event.kind.value,
             timestamp(event.occurred_at),
             encoded,
@@ -246,7 +249,7 @@ class EventStore:
         try:
             with connect(self.path) as connection:
                 sql = (
-                    "SELECT event_id, execution_id, sequence, kind, occurred_at, "
+                    "SELECT event_id, execution_id, sequence, schema_version, kind, occurred_at, "
                     "payload_json, redacted FROM native_events "
                     "WHERE execution_id = ?"
                 )
@@ -295,7 +298,7 @@ class EventStore:
         try:
             with connect(self.path) as connection:
                 sql = (
-                    "SELECT event_id, execution_id, sequence, kind, occurred_at, "
+                    "SELECT event_id, execution_id, sequence, schema_version, kind, occurred_at, "
                     "payload_json, redacted FROM native_events "
                     "WHERE execution_id = ?"
                 )

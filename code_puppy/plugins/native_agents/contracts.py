@@ -100,6 +100,7 @@ class NativeEvent(_StrictModel, frozen=True):
     event_id: str
     execution_id: str
     sequence: int = Field(ge=1)
+    schema_version: int = Field(default=1, ge=1)
     kind: NativeEventKind
     occurred_at: datetime
     payload: dict[str, JsonValue]

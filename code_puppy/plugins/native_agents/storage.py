@@ -10,7 +10,7 @@ from typing import Iterator
 
 from .errors import NativeStorageUnavailableError
 
-LATEST_SCHEMA_VERSION = 1
+LATEST_SCHEMA_VERSION = 2
 
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -60,6 +60,10 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX idx_native_executions_session_created
           ON native_executions(session_id, created_at DESC);
         """,
+    ),
+    (
+        2,
+        "ALTER TABLE native_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;",
     ),
 )
 
