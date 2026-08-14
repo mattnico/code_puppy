@@ -246,6 +246,33 @@ show a symbolic description and allowed operation names, never the opaque
 handle ID or full result set. Reference cleanup is execution-scoped and
 idempotent.
 
+## Phase 7 release decision and rollout
+
+The approved scope is **Tier A — Typed prediction**. It includes the explicit
+async decorator, strict typed outputs, durable state/events, bounded context,
+read-only scoped handles, the search-result capabilities, diagnostics, and
+optional integrations. CodeAct is explicitly deferred: no worker, `exec`,
+model-written Python, modify/execute/secret capability, RPC protocol, or
+platform-isolation fallback exists in this release.
+
+Rollout is staged and opt-in: local disposable profiles first, maintainer
+dogfood for `native-reviewer`, then a limited experimental Predict preview.
+The master `native_agents_enabled=false` flag is the kill switch; disabling it
+prevents new invocations and hides the demo/diagnostic surface while ordinary
+agents remain on their existing path. Disable CodeAct independently if it is
+ever introduced later. Preserve redacted execution evidence, revoke live
+handles, add a regression/security test, and require a new security review
+before any later CodeAct work.
+
+Release evidence in this branch: 70 deterministic native-agent tests, 264
+normal-agent/i18n/builder/compaction regression tests, full Ruff check/format,
+and no external model credentials. The test matrix covers success, invalid
+contracts, bounded validation failure, cancellation, storage failure, state
+conflict, redaction, context truncation, compaction survival, expired and
+cross-execution handles, policy denial, search capabilities, optional
+DBOS/MCP/Kennel/session/permission behavior, diagnostics, and localized
+messages.
+
 ## Phase 6 ecosystem integration
 
 Tier A keeps Code Puppy's existing seams authoritative. PredictStrategy builds

@@ -4,6 +4,7 @@
   "native_agents.command.disabled": "Los agentes nativos están desactivados. Activa native_agents_enabled para usarlos.",
   "native_agents.command.diagnostics_disabled": "Los diagnósticos nativos están desactivados.",
   "native_agents.command.cleanup_unavailable": "La limpieza nativa no está disponible; los identificadores locales caducan automáticamente.",
+  "native_agents.command.cleanup": "La limpieza nativa eliminó {count} registros de ejecuciones terminadas.",
   "native_agents.command.usage": "Uso: /native status|diagnostics|cleanup",
   "native_agents.command.help": "Estado y diagnósticos de agentes nativos (limitados por funciones)",
   "native_agents.command.status": "Agentes nativos: {enabled}; CodeAct: {codeact}.",

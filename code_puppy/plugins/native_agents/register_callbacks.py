@@ -52,8 +52,15 @@ def _feature_capability(name: str) -> bool | None:
     return None
 
 
+def _register_agents():
+    _initialize_if_enabled()
+    if not is_enabled() or not storage_ready():
+        return []
+    return registered_agents()
+
+
 register_callback("startup", _initialize_if_enabled)
 register_callback("custom_command", handle_native_command)
 register_callback("custom_command_help", native_command_help)
-register_callback("register_agents", registered_agents)
+register_callback("register_agents", _register_agents)
 register_callback("feature_capability", _feature_capability)

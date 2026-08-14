@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -191,6 +192,47 @@ class StateStore:
         if row is None:  # pragma: no cover - guarded by rowcount
             raise StateSchemaError("native execution disappeared")
         return _record_from_row(row)
+
+    def purge_expired(self, retention_days: int, *, now: datetime | None = None) -> int:
+        """Delete only terminal records older than the bounded retention window."""
+
+        if not 1 <= retention_days <= 3_650:
+            raise StateSchemaError("retention days are outside the safe bound")
+        current = now or utc_now()
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise StateSchemaError("cleanup time must be timezone-aware")
+        cutoff = current.astimezone(timezone.utc) - timedelta(days=retention_days)
+        terminal = tuple(
+            status.value
+            for status in (
+                NativeExecutionStatus.FINISHED,
+                NativeExecutionStatus.FAILED,
+                NativeExecutionStatus.CANCELLED,
+            )
+        )
+        placeholders = ",".join("?" for _ in terminal)
+        with connect(self.path) as connection:
+            connection.execute("BEGIN")
+            rows = connection.execute(
+                "SELECT execution_id FROM native_executions "
+                f"WHERE status IN ({placeholders}) AND created_at < ?",
+                (*terminal, timestamp(cutoff)),
+            ).fetchall()
+            execution_ids = [row[0] for row in rows]
+            for execution_id in execution_ids:
+                connection.execute(
+                    "DELETE FROM native_events WHERE execution_id = ?", (execution_id,)
+                )
+                connection.execute(
+                    "DELETE FROM native_state_snapshots WHERE execution_id = ?",
+                    (execution_id,),
+                )
+                connection.execute(
+                    "DELETE FROM native_executions WHERE execution_id = ?",
+                    (execution_id,),
+                )
+            connection.commit()
+        return len(execution_ids)
 
     def initialize_state(
         self,

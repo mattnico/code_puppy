@@ -10,7 +10,19 @@ def test_native_commands_are_feature_gated_and_namespaced(monkeypatch):
     assert commands.native_command_help() == []
 
 
-def test_diagnostics_is_localized_and_redacted(monkeypatch):
+def test_cleanup_command_is_feature_and_diagnostics_gated(monkeypatch):
+    monkeypatch.setattr(commands, "is_enabled", lambda: True)
+    monkeypatch.setattr(commands, "diagnostics_enabled", lambda: True)
+    monkeypatch.setattr(commands, "store_retention_days", lambda: 30)
+    monkeypatch.setattr(
+        commands,
+        "StateStore",
+        lambda *args, **kwargs: type(
+            "Store", (), {"purge_expired": lambda self, _days: 2}
+        )(),
+    )
+    output = commands.handle_native_command("/native cleanup", "native")
+    assert "2" in output
     monkeypatch.setattr(commands, "is_enabled", lambda: True)
     monkeypatch.setattr(commands, "diagnostics_enabled", lambda: True)
     monkeypatch.setattr(commands, "codeact_enabled", lambda: False)

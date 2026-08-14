@@ -6,8 +6,15 @@ import sqlite3
 
 from code_puppy.i18n import t
 
-from .config import codeact_enabled, database_path, diagnostics_enabled, is_enabled
+from .config import (
+    codeact_enabled,
+    database_path,
+    diagnostics_enabled,
+    is_enabled,
+    store_retention_days,
+)
 from .integrations import dbos
+from .state_store import StateStore
 from .storage import LATEST_SCHEMA_VERSION, schema_version
 
 
@@ -29,7 +36,7 @@ def handle_native_command(command: str, name: str):
     if subcommand == "cleanup":
         if not diagnostics_enabled():
             return t("native_agents.command.diagnostics_disabled")
-        return t("native_agents.command.cleanup_unavailable")
+        return _cleanup()
     return t("native_agents.command.usage")
 
 
@@ -45,6 +52,16 @@ def _status() -> str:
         enabled="on" if is_enabled() else "off",
         codeact="on" if codeact_enabled() else "off",
     )
+
+
+def _cleanup() -> str:
+    try:
+        removed = StateStore(str(database_path()), initialize=False).purge_expired(
+            store_retention_days()
+        )
+    except Exception:
+        removed = 0
+    return t("native_agents.command.cleanup", count=removed)
 
 
 def _diagnostics() -> str:
