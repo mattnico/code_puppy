@@ -8,7 +8,7 @@
   "native_agents.value.unavailable": "unavailable",
   "native_agents.value.launched": "launched",
   "native_agents.value.not_launched": "not launched",
-  "native_agents.command.disabled": "Native agents are disabled. Enable native_agents_enabled to use them.",
+  "native_agents.config.invalid_value": "Invalid native-agent setting {name}; using its safe default.",
   "native_agents.command.diagnostics_disabled": "Native diagnostics are disabled.",
   "native_agents.command.cleanup_unavailable": "Native cleanup is currently unavailable; process-local handles expire automatically.",
   "native_agents.command.cleanup": "Native cleanup removed {count} terminal execution records.",

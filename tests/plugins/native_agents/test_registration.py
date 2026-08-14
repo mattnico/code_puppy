@@ -50,4 +50,11 @@ def test_unreadable_feature_config_fails_closed(monkeypatch):
     monkeypatch.setattr(config_module, "get_value", unreadable)
     assert config_module.is_enabled() is False
     assert config_module.diagnostics_enabled() is False
+
+
+def test_invalid_bounded_setting_warns_and_uses_safe_default(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(config_module, "_warn_invalid_setting", warnings.append)
+    monkeypatch.setattr(config_module, "get_value", lambda _key: "not-an-int")
     assert config_module.context_max_chars() == 12_000
+    assert warnings == ["native_agents_context_max_chars"]

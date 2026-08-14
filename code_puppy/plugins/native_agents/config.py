@@ -19,6 +19,22 @@ _DEFAULTS = {
     "native_agents_event_max_per_view": (30, 0, 500),
     "native_agents_state_max_bytes": (65_536, 1_048, 1_048_576),
 }
+_WARNED_INVALID_SETTINGS: set[str] = set()
+
+
+def _warn_invalid_setting(name: str) -> None:
+    if name in _WARNED_INVALID_SETTINGS:
+        return
+    _WARNED_INVALID_SETTINGS.add(name)
+    try:
+        from code_puppy.i18n import t
+        from code_puppy.messaging import emit_warning
+
+        emit_warning(t("native_agents.config.invalid_value", name=name))
+    except Exception:
+        # Configuration warnings are optional enrichment; a broken message bus
+        # must never turn a safe fallback into a startup failure.
+        return
 
 
 def _truthy(value: object, *, default: bool = False) -> bool:
@@ -75,8 +91,12 @@ def bounded_int(name: str) -> int:
     try:
         value = int(raw) if raw is not None else default
     except (TypeError, ValueError):
+        _warn_invalid_setting(name)
         return default
-    return value if minimum <= value <= maximum else default
+    if not minimum <= value <= maximum:
+        _warn_invalid_setting(name)
+        return default
+    return value
 
 
 def store_retention_days() -> int:

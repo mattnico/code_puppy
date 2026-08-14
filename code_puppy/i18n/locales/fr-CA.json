@@ -8,7 +8,7 @@
   "native_agents.value.unavailable": "indisponible",
   "native_agents.value.launched": "lancé",
   "native_agents.value.not_launched": "non lancé",
-  "native_agents.command.disabled": "Les agents natifs sont désactivés. Activez native_agents_enabled pour les utiliser.",
+  "native_agents.config.invalid_value": "Le paramètre de l’agent natif est invalide ({name}); la valeur sécuritaire par défaut sera utilisée.",
   "native_agents.command.diagnostics_disabled": "Les diagnostics natifs sont désactivés.",
   "native_agents.command.cleanup_unavailable": "Le nettoyage natif est indisponible; les identifiants locaux expirent automatiquement.",
   "native_agents.command.cleanup": "Le nettoyage natif a supprimé {count} exécutions terminées.",
