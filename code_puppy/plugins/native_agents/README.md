@@ -273,7 +273,7 @@ before any later CodeAct work.
 
 Release evidence in this branch: 88 deterministic native-agent tests, 403
 focused native/agent/integration/i18n regression tests, full Ruff check/format,
-and no external model credentials. The final repository-wide run reports 7,271
+and no external model credentials. The final repository-wide run reports 7,272
 passing tests, 23 skipped, 1 xpassed, and three unrelated
 model-picker/attachment failures outside the changed paths. The added
 capability-boundary tests cover expiry races, cancellation audit outcomes, and
