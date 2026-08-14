@@ -193,7 +193,7 @@ references/capabilities. The model prompt is bounded by `ContextBudget`, and
 native context is never added to the parent transcript. Runtime-created handles
 are revoked on completion, failure, and cancellation.
 
-Phase 1 targeted evidence: `tests/plugins/native_agents` passes 73
+Phase 1 targeted evidence: `tests/plugins/native_agents` passes 84
 deterministic tests covering strict contracts, migrations, state revisions,
 stale conflicts, redaction, immutable events, scope cleanup, cancellation,
 and disabled/failed registration. The repository's existing unrelated
@@ -271,14 +271,16 @@ ever introduced later. Preserve redacted execution evidence, revoke live
 handles, add a regression/security test, and require a new security review
 before any later CodeAct work.
 
-Release evidence in this branch: 73 deterministic native-agent tests, 1,084
-normal-agent/i18n/builder/compaction regression tests, full Ruff check/format,
-and no external model credentials. The test matrix covers success, invalid
-contracts, bounded validation failure, cancellation, storage failure, state
-conflict, redaction, context truncation, compaction survival, expired and
-cross-execution handles, policy denial, search capabilities, optional
-DBOS/MCP/Kennel/session/permission behavior, diagnostics, and localized
-messages.
+Release evidence in this branch: 84 deterministic native-agent tests, 403
+focused native/agent/integration/i18n regression tests, full Ruff check/format,
+and no external model credentials. The final repository-wide run reports 7,268
+passing tests, 23 skipped, 1 xpassed, and three unrelated
+model-picker/attachment failures outside the changed paths.
+covers success, invalid contracts, bounded validation failure, cancellation,
+storage failure, state conflict, redaction, context truncation, compaction
+survival, expired and cross-execution handles, policy denial, search
+capabilities, optional DBOS/MCP/Kennel/session/permission behavior,
+diagnostics, and localized messages.
 
 ## Phase 6 ecosystem integration
 
