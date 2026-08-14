@@ -94,9 +94,12 @@ class _StrictModel(BaseModel):
     def model_copy(
         self, *, update: Mapping[str, Any] | None = None, deep: bool = False
     ):
-        copied = super().model_copy(update=update, deep=deep)
-        copied.model_post_init(None)
-        return copied
+        """Return a freshly validated copy instead of Pydantic's unchecked copy."""
+
+        data = self.model_dump(mode="python")
+        if update:
+            data.update(update)
+        return type(self).model_validate(data)
 
 
 class NativeStrategyName(str, Enum):

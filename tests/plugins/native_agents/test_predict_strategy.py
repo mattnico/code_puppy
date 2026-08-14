@@ -40,7 +40,14 @@ async def test_predict_strategy_returns_declared_output_through_real_builder(
         ),
     )
     monkeypatch.setattr(builder, "load_mcp_servers", lambda **kwargs: [])
-    monkeypatch.setattr(builder.ModelFactory, "load_config", lambda: {})
+    end_calls = []
+
+    async def record_end(*args, **kwargs):
+        end_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.predict.on_agent_run_end", record_end
+    )
 
     agent = NativeReviewerAgent()
     result = await PredictStrategy().execute(
@@ -55,6 +62,7 @@ async def test_predict_strategy_returns_declared_output_through_real_builder(
     assert agent.get_message_history() == []
     assert agent.pydantic_agent is None
     assert agent._code_generation_agent is None
+    assert end_calls == [{"success": True, "error": None}]
 
 
 async def test_predict_strategy_rejects_wrong_fake_output(monkeypatch):

@@ -16,7 +16,7 @@ from .config import (
 from .integrations import dbos
 from .errors import NativeStorageUnavailableError
 from .state_store import StateStore
-from .storage import LATEST_SCHEMA_VERSION, schema_version
+from .storage import LATEST_SCHEMA_VERSION, _verify_schema, connect, schema_version
 
 
 def handle_native_command(command: str, name: str):
@@ -76,7 +76,8 @@ def _diagnostics() -> str:
     executions = 0
     try:
         version = schema_version(path)
-        with sqlite3.connect(path) as connection:
+        with connect(path) as connection:
+            _verify_schema(connection)
             executions = int(
                 connection.execute("SELECT COUNT(*) FROM native_executions").fetchone()[
                     0

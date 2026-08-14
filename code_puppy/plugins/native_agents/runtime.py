@@ -188,6 +188,8 @@ class NativeMethodRuntime:
                     "native execution record disappeared"
                 )
             state_snapshot = state_store.get_state(identity.execution_id)
+            if state_service is not None:
+                state_service.get()
             event_limit = spec.context_budget.max_events
             event_summaries = (
                 event_store.recent_summaries(

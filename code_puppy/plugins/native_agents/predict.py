@@ -140,6 +140,7 @@ class PredictStrategy:
                             raise NativeOutputValidationError(
                                 "native output did not satisfy the declared schema"
                             )
+                        success = True
                         error = None
                         return validated_output
                     except asyncio.CancelledError as exc:

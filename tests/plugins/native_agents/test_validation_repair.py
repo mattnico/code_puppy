@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from code_puppy.plugins.native_agents.contracts import (
     NativeEventKind,
@@ -17,10 +18,18 @@ from code_puppy.plugins.native_agents.errors import (
     EventStoreError,
     NativeOutputValidationError,
     NativeStorageUnavailableError,
+    StateSchemaError,
 )
 from code_puppy.plugins.native_agents.events import EventStore
 from code_puppy.plugins.native_agents.runtime import NativeMethodRuntime
+from code_puppy.plugins.native_agents.state import StateService
 from code_puppy.plugins.native_agents.state_store import StateStore
+
+
+class InvalidState(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: str
 
 
 class ReturningStrategy:
@@ -158,6 +167,35 @@ async def test_setup_failure_marks_created_execution_terminal(monkeypatch, tmp_p
         str(tmp_path / "native.sqlite3"), initialize=False
     ).get_execution(_find_execution_id(tmp_path))
     assert record.status is NativeExecutionStatus.FAILED
+    assert strategy.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_semantically_corrupt_state_fails_before_strategy(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.runtime.is_enabled", lambda: True
+    )
+    monkeypatch.setattr(
+        StateService,
+        "get",
+        lambda _self: (_ for _ in ()).throw(
+            StateSchemaError("stored state no longer matches its schema")
+        ),
+    )
+    agent = NativeReviewerAgent()
+    spec = agent.get_native_method("summarize_change").model_copy(
+        update={
+            "state_type": InvalidState,
+            "state_schema_name": "InvalidState",
+            "state_factory": lambda _payload: InvalidState(status="ready"),
+        }
+    )
+    strategy = ReturningStrategy(_result())
+    runtime = NativeMethodRuntime(
+        db_path=tmp_path / "native.sqlite3", predict_strategy=strategy
+    )
+    with pytest.raises(StateSchemaError):
+        await runtime.execute(agent, spec, _input())
     assert strategy.calls == 0
 
 

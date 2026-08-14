@@ -75,6 +75,19 @@ def test_models_round_trip_timezone_revision_and_schema():
     assert restored.created_at.tzinfo is not None
 
 
+def test_model_copy_revalidates_strict_boundary_updates():
+    event = NativeEvent(
+        event_id="event-1",
+        execution_id="exec-1",
+        sequence=1,
+        kind=NativeEventKind.EXECUTION_STARTED,
+        occurred_at=UTC_NOW,
+        payload={},
+    )
+    with pytest.raises(ValidationError):
+        event.model_copy(update={"sequence": "bad"})
+
+
 def test_capability_names_require_namespaced_identifiers():
     from code_puppy.plugins.native_agents.contracts import (
         CapabilityEffect,
