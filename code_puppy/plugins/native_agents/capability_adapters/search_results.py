@@ -118,7 +118,7 @@ def _validate_relative_path(path: str) -> None:
         not path
         or path.startswith("/")
         or path.startswith("~")
-        or (len(path) >= 3 and path[1] == ":" and path[2] == "/")
+        or (len(path) >= 2 and path[1] == ":")
     ):
         raise ValueError("path must be relative")
     if any(component == ".." for component in path.split("/")):
