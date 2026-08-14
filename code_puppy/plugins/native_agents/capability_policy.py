@@ -33,6 +33,10 @@ class CapabilityPolicy:
             return AuthorizationDecision(
                 allowed=False, reason="Capability is not permitted for this method."
             )
+        if method.name != execution.method_name:
+            return AuthorizationDecision(
+                allowed=False, reason="Capability is not permitted for this execution."
+            )
         if method.strategy is not NativeStrategyName.PREDICT:
             return AuthorizationDecision(
                 allowed=False, reason="Capability strategy is not permitted."

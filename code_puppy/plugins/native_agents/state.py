@@ -29,12 +29,16 @@ class StateService:
         state_store: StateStore,
         event_store: EventStore,
         max_bytes: int | None = None,
+        schema_version: int = 1,
     ) -> None:
         self.execution_id = execution_id
         self.state_type = state_type
         self.state_store = state_store
         self.event_store = event_store
+        self.schema_version = schema_version
         self.max_bytes = state_max_bytes() if max_bytes is None else max_bytes
+        if self.schema_version < 1:
+            raise StateSchemaError("state schema version must be positive")
         if self.max_bytes < 1:
             raise StateSchemaError("native state size limit must be positive")
 
@@ -85,7 +89,7 @@ class StateService:
             self.execution_id,
             validated,
             schema_name=self.state_type.__name__,
-            schema_version=1,
+            schema_version=self.schema_version,
         )
         return snapshot
 
@@ -115,7 +119,7 @@ class StateService:
             expected_revision=expected_revision,
             state=validated,
             schema_name=self.state_type.__name__,
-            schema_version=1,
+            schema_version=self.schema_version,
             event_payload={
                 "from_revision": expected_revision,
                 "to_revision": expected_revision + 1,

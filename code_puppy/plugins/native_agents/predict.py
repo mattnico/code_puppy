@@ -8,6 +8,8 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
+from pydantic import ValidationError
+
 from pydantic_ai import UnexpectedModelBehavior, UsageLimits
 
 from code_puppy.agents._builder import build_pydantic_agent
@@ -18,10 +20,12 @@ from code_puppy.callbacks import (
 )
 from code_puppy.config import get_message_limit
 
+from .config import is_enabled
 from .contracts import MethodSpec
-from .errors import NativeOutputValidationError
-from .invocation_agent import NativeInvocationAgent
+from .errors import NativeOutputValidationError, NativeRuntimeDisabledError
+from .execution import NativeExecutionContext
 from .integrations.kennel import bounded_recall
+from .invocation_agent import NativeInvocationAgent
 from .prompts import build_method_prompt
 
 ValidationReporter = Callable[[int, str], Any]
@@ -50,8 +54,13 @@ class PredictStrategy:
         *,
         execution_id: str,
         context_text: str = "",
+        native_context: NativeExecutionContext | None = None,
         on_validation_failure: ValidationReporter | None = None,
     ) -> Any:
+        if not is_enabled():
+            raise NativeRuntimeDisabledError("native agents are disabled")
+        if spec.strategy.value != "predict":
+            raise NativeRuntimeDisabledError("native strategy is not available")
         memory = bounded_recall(enabled=spec.memory_opt_in)
         if memory and memory not in parent_agent.get_full_system_prompt():
             context_text = f"{context_text}\n## Curated memory (data)\n{memory}"
@@ -62,7 +71,9 @@ class PredictStrategy:
             parent_agent_name=parent_agent.name,
             context_text=context_text,
         )
-        invocation_agent = NativeInvocationAgent(parent_agent, spec, prompt)
+        invocation_agent = NativeInvocationAgent(
+            parent_agent, spec, prompt, native_context=native_context
+        )
         pydantic_agent = build_pydantic_agent(
             invocation_agent,
             output_type=spec.output_type,
@@ -90,7 +101,7 @@ class PredictStrategy:
                     attempt_prompt = (
                         prompt
                         if attempt == 1
-                        else _repair_prompt(spec, attempt, attempts)
+                        else _repair_prompt(spec, prompt, attempt, attempts)
                     )
                     try:
                         result = await pydantic_agent.run(
@@ -109,10 +120,21 @@ class PredictStrategy:
                     except asyncio.CancelledError as exc:
                         error = exc
                         raise
-                    except (
-                        UnexpectedModelBehavior,
-                        NativeOutputValidationError,
-                    ) as exc:
+                    except UnexpectedModelBehavior as exc:
+                        if not _is_output_validation_failure(exc):
+                            error = exc
+                            raise
+                        error = exc
+                        await _report_validation(
+                            on_validation_failure,
+                            attempt,
+                            "native_output_validation_failed",
+                        )
+                        if attempt == attempts:
+                            raise NativeOutputValidationError(
+                                "native output did not satisfy the declared schema"
+                            ) from exc
+                    except NativeOutputValidationError as exc:
                         error = exc
                         await _report_validation(
                             on_validation_failure,
@@ -136,12 +158,26 @@ class PredictStrategy:
             )
 
 
-def _repair_prompt(spec: MethodSpec, attempt: int, attempts: int) -> str:
+def _is_output_validation_failure(error: BaseException) -> bool:
+    """Distinguish output-schema failures from tool/provider failures."""
+
+    if "output validation" in str(error).lower():
+        return True
+    cause = error.__cause__ or error.__context__
+    return isinstance(cause, ValidationError)
+
+
+def _repair_prompt(
+    spec: MethodSpec, original_prompt: str, attempt: int, attempts: int
+) -> str:
     """Ask for the same contract without echoing provider/model data."""
 
-    return (
-        f"## Native method repair attempt {attempt} of {attempts}\n"
-        f"Return only a valid {spec.output_schema_name} matching the declared "
-        "output schema. The previous response failed typed validation. "
+    note = (
+        f"\n\n## Native method repair attempt {attempt} of {attempts}\n"
+        "The previous response failed typed validation. Return only a valid "
+        f"{spec.output_schema_name} matching the declared output schema. "
         "Do not add commentary, extra fields, or invented evidence."
     )
+    if len(original_prompt) + len(note) <= spec.context_budget.max_chars:
+        return original_prompt + note
+    return original_prompt

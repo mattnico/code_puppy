@@ -167,10 +167,11 @@ contract.
 Phase 2 adds the explicit `@native_method` declaration, `NativeAgentMixin`,
 an ephemeral `NativeInvocationAgent`, and `NativeMethodRuntime`. A
 prediction accepts exactly one Pydantic input model and returns exactly the
-declared Pydantic output model. Declarations must be `async`, have a stub body,
-match their input/return annotations, and may declare only the read-only
-capabilities introduced in Phase 4. `codeact` is rejected rather than silently
-treated as prediction.
+declared Pydantic output model. Boundary models must use `strict=True` and
+`extra="forbid"`. Declarations must be `async`, have a stub body, match their
+input/return annotations, and may declare only the read-only capabilities
+introduced in Phase 4. `codeact` is rejected rather than silently treated as
+prediction.
 
 The invocation adapter delegates stable model/tool/MCP configuration to the
 parent but owns history, builder fields, identity, and transient resources.
@@ -184,12 +185,15 @@ The opt-in `native-reviewer` agent is registered only while
 `native_agents_enabled` is truthy. Its `summarize_change` method returns
 structured findings that ordinary Python can group by severity. It does not
 read files, write files, run shell commands, browse, or use MCP side effects.
-The model prompt is bounded by `ContextBudget`, and the runtime records start,
-validation failure, completion/failure, and cancellation events without
-adding native transcript messages to the parent.
+A declared state model may use defaults or a trusted `state_factory(payload)`
+when required domain fields must be derived from the validated input. The
+runtime exposes a non-persisted `NativeExecutionContext` to the strategy with
+revision-checked state, event queries, bounded context, and execution-scoped
+references/capabilities. The model prompt is bounded by `ContextBudget`, and
+native context is never added to the parent transcript. Runtime-created handles
+are revoked on completion, failure, and cancellation.
 
-
-Phase 1 targeted evidence: `tests/plugins/native_agents` passes 20
+Phase 1 targeted evidence: `tests/plugins/native_agents` passes 73
 deterministic tests covering strict contracts, migrations, state revisions,
 stale conflicts, redaction, immutable events, scope cleanup, cancellation,
 and disabled/failed registration. The repository's existing unrelated

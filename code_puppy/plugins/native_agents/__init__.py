@@ -51,6 +51,7 @@ from .errors import (
     StateSchemaError,
 )
 from .events import EventService, EventStore
+from .execution import NativeExecutionContext
 from .method import NativeAgentMixin, native_method
 from .predict import PredictStrategy
 from .reference_store import ReferenceStore
@@ -83,6 +84,7 @@ __all__ = [
     "NativeEventKind",
     "NativeExecutionRecord",
     "NativeExecutionStatus",
+    "NativeExecutionContext",
     "NativeMethodRuntime",
     "NativeOutputValidationError",
     "NativeRuntimeDisabledError",

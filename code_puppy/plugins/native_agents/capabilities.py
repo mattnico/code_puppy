@@ -24,9 +24,19 @@ from .errors import (
     HandleUnavailableError,
 )
 from .events import EventStore
+from .execution import current_execution
 from .reference_store import ReferenceStore, handle_id_hash
 
 CapabilityHandler = Callable[[Any, BaseModel, ExecutionIdentity], Any]
+
+
+def _strict_boundary_model(model: type[BaseModel]) -> bool:
+    config = getattr(model, "model_config", {})
+    return (
+        isinstance(config, dict)
+        and config.get("extra") == "forbid"
+        and config.get("strict") is True
+    )
 
 
 class CapabilityRegistry:
@@ -49,6 +59,10 @@ class CapabilityRegistry:
             raise ValueError(f"capability {spec.name!r} is already registered")
         if not callable(handler):
             raise TypeError("capability handler must be callable")
+        if not _strict_boundary_model(spec.input_model) or not _strict_boundary_model(
+            spec.output_model
+        ):
+            raise CapabilityValidationError("capability models are not strict")
         self._capabilities[spec.name] = (spec, handler)
 
     def get(self, name: str) -> CapabilitySpec:
@@ -66,9 +80,18 @@ class CapabilityRegistry:
         method: MethodSpec,
         execution: ExecutionIdentity,
     ) -> BaseModel:
+        active_execution = current_execution(required=False)
+        if active_execution is not None and (
+            active_execution.execution_id != execution.execution_id
+        ):
+            raise CapabilityDeniedError("capability execution is not active")
         spec, handler = self._capabilities.get(name, (None, None))
         if spec is None or handler is None:
             raise CapabilityNotFoundError("capability is unavailable")
+        if not _strict_boundary_model(spec.input_model) or not _strict_boundary_model(
+            spec.output_model
+        ):
+            raise CapabilityValidationError("capability models are not strict")
         supplied_id = (
             handle.handle_id if isinstance(handle, ReferenceHandle) else str(handle)
         )

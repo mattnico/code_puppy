@@ -30,9 +30,11 @@ from .storage import (
 
 _SECRET_KEY_RE = re.compile(
     r"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|credential|password|"
-    r"private[_-]?key|client[_-]?secret|secret|session[_-]?cookie|refresh[_-]?token)",
+    r"private[_-]?key|client[_-]?secret|token|secret|session[_-]?cookie|"
+    r"refresh[_-]?token)",
     re.IGNORECASE,
 )
+
 _SECRET_VALUE_RE = re.compile(
     r"(?i)\b(?:bearer\s+|basic\s+)[a-z0-9._~+/=-]{8,}|"
     r"(?:https?|postgres(?:ql)?|mysql)://[^\s]+:[^\s]+@[^\s]+|"
@@ -40,6 +42,7 @@ _SECRET_VALUE_RE = re.compile(
     r"\s*[:=]\s*[^\s,;]+"
 )
 _REDACTED = "[REDACTED]"
+_MAX_EVENT_PAYLOAD_BYTES = 65_536
 
 
 def _is_secret_field(field_info: Any) -> bool:
@@ -57,7 +60,9 @@ def _redact_model_mapping(serialized: Any, original: BaseModel) -> Any:
     for key, item in serialized.items():
         name = str(key)
         field_info = fields.get(name)
-        if field_info is not None and _is_secret_field(field_info):
+        if field_info is not None and (
+            _is_secret_field(field_info) or _SECRET_KEY_RE.search(name)
+        ):
             result[name] = _REDACTED
             continue
         original_item = getattr(original, name, None)
@@ -113,6 +118,8 @@ def redact_payload(value: Any) -> dict[str, JsonValue]:
         else:
             raise EventStoreError("native payload must be a mapping")
         encoded = json.dumps(redacted, ensure_ascii=False, allow_nan=False)
+        if len(encoded.encode("utf-8")) > _MAX_EVENT_PAYLOAD_BYTES:
+            raise EventStoreError("native event payload exceeds its size limit")
         decoded = json.loads(encoded)
     except EventStoreError:
         raise
@@ -279,19 +286,47 @@ class EventStore:
             ),
         )
 
+    def recent_summaries(
+        self, execution_id: str, query: EventQuery
+    ) -> list[EventSummary]:
+        """Return the newest bounded summaries in display order."""
+
+        summary_query = query.model_copy(update={"include_payload": True})
+        try:
+            with connect(self.path) as connection:
+                sql = (
+                    "SELECT event_id, execution_id, sequence, kind, occurred_at, "
+                    "payload_json, redacted FROM native_events "
+                    "WHERE execution_id = ?"
+                )
+                params: list[Any] = [execution_id]
+                if summary_query.kinds:
+                    placeholders = ",".join("?" for _ in summary_query.kinds)
+                    sql += f" AND kind IN ({placeholders})"
+                    params.extend(kind.value for kind in summary_query.kinds)
+                if summary_query.after_sequence is not None:
+                    sql += " AND sequence > ?"
+                    params.append(summary_query.after_sequence)
+                sql += " ORDER BY sequence DESC LIMIT ?"
+                params.append(summary_query.limit)
+                rows = connection.execute(sql, params).fetchall()
+            events = [_event_from_row(row) for row in reversed(rows)]
+            return [
+                EventSummary(
+                    sequence=event.sequence,
+                    kind=event.kind,
+                    occurred_at=event.occurred_at,
+                    summary=_summary_text(event),
+                )
+                for event in events
+            ]
+        except sqlite3.Error as exc:
+            raise EventStoreError("native event query failed") from exc
+
     def summaries(self, execution_id: str, query: EventQuery) -> list[EventSummary]:
         """Return deterministic bounded summaries with payloads omitted."""
 
-        summary_query = query.model_copy(update={"include_payload": True})
-        return [
-            EventSummary(
-                sequence=event.sequence,
-                kind=event.kind,
-                occurred_at=event.occurred_at,
-                summary=_summary_text(event),
-            )
-            for event in self.query(execution_id, summary_query)
-        ]
+        return self.recent_summaries(execution_id, query)
 
 
 class EventService:

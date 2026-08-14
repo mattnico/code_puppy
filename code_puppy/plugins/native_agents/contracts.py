@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypeAliasType
@@ -251,6 +252,7 @@ class MethodSpec(_StrictModel, frozen=True):
     input_type: type[BaseModel] = BaseModel
     output_type: type[BaseModel] = BaseModel
     state_type: type[BaseModel] | None = None
+    state_schema_version: int = Field(default=1, ge=1)
     max_validation_repairs: int = Field(default=1, ge=0, le=3)
     context_budget: ContextBudget = Field(
         default_factory=lambda: ContextBudget(
@@ -261,3 +263,4 @@ class MethodSpec(_StrictModel, frozen=True):
     )
     instructions: str = Field(default="", max_length=8_000)
     memory_opt_in: bool = False
+    state_factory: Callable[[BaseModel], BaseModel] | None = None

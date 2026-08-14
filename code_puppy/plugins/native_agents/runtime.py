@@ -9,8 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from .context import ContextRenderer, render_context_text
 from .config import (
     context_max_chars,
@@ -33,10 +31,15 @@ from .errors import (
     NativeStorageUnavailableError,
     StateSchemaError,
 )
-from .events import EventStore, redact_payload
-from .execution import current_execution, execution_scope
+from .events import EventService, EventStore, redact_payload
+from .execution import NativeExecutionContext, current_execution, execution_scope
+from .integrations.sessions import session_id
 from .predict import PredictStrategy
+from .reference_store import ReferenceStore
+from .state import StateService
 from .state_store import StateStore
+from .capabilities import CapabilityRegistry
+from .capability_adapters.search_results import register_search_result_capabilities
 from .storage import initialize_database
 
 
@@ -90,6 +93,16 @@ class NativeMethodRuntime:
                 parent_agent, spec, payload, state_store, event_store
             )
 
+    async def _revoke_references(
+        self, references: ReferenceStore, execution_id: str
+    ) -> None:
+        try:
+            await references.revoke_execution(execution_id)
+        except Exception:
+            # Cleanup must never replace the native result/error. The store has
+            # already removed live values before emitting optional audit events.
+            return
+
     async def _execute_locked(
         self,
         parent_agent: Any,
@@ -103,7 +116,7 @@ class NativeMethodRuntime:
             execution_id=str(uuid.uuid4()),
             agent_name=parent_agent.name,
             method_name=spec.name,
-            session_id=getattr(parent_agent, "native_session_id", None),
+            session_id=session_id(parent_agent),
             parent_execution_id=(
                 parent_execution.execution_id if parent_execution else None
             ),
@@ -119,24 +132,53 @@ class NativeMethodRuntime:
             NativeEventKind.EXECUTION_STARTED,
             {"agent_name": identity.agent_name, "method_name": identity.method_name},
         )
+        references = ReferenceStore(event_store=event_store)
+        capabilities = CapabilityRegistry(
+            references=references,
+            event_store=event_store,
+        )
+        register_search_result_capabilities(capabilities, references)
+        event_service = EventService(identity.execution_id, event_store)
+        state_service: StateService | None = None
         if spec.state_type is not None:
             try:
-                initial_state = spec.state_type()
-                state_store.initialize_state(
-                    identity.execution_id,
-                    initial_state,
-                    schema_name=spec.state_type.__name__,
-                    schema_version=1,
+                initial_state = (
+                    spec.state_factory(payload)
+                    if spec.state_factory is not None
+                    else spec.state_type()
                 )
-            except (ValidationError, StateSchemaError) as exc:
+                state_service = StateService(
+                    execution_id=identity.execution_id,
+                    state_type=spec.state_type,
+                    state_store=state_store,
+                    event_store=event_store,
+                    schema_version=spec.state_schema_version,
+                )
+                state_service.initialize(initial_state)
+            except Exception as exc:
+                state_error = (
+                    exc
+                    if isinstance(exc, StateSchemaError)
+                    else StateSchemaError("native state initialization failed")
+                )
+                await self._revoke_references(references, identity.execution_id)
                 return await self._fail(
                     state_store,
                     event_store,
                     identity,
                     "state_initialization_failed",
-                    str(exc),
-                    exc,
+                    str(state_error),
+                    state_error,
                 )
+        native_context = NativeExecutionContext(
+            identity=identity,
+            method=spec,
+            state=state_service,
+            events=event_service,
+            context=ContextRenderer(),
+            references=references,
+            capabilities=capabilities,
+        )
         state_store.set_execution_status(
             identity.execution_id, NativeExecutionStatus.RUNNING
         )
@@ -146,7 +188,7 @@ class NativeMethodRuntime:
         state_snapshot = state_store.get_state(identity.execution_id)
         event_limit = spec.context_budget.max_events
         event_summaries = (
-            event_store.summaries(
+            event_store.recent_summaries(
                 identity.execution_id,
                 EventQuery(limit=max(1, event_limit)),
             )
@@ -159,12 +201,16 @@ class NativeMethodRuntime:
                 "max_events": min(spec.context_budget.max_events, event_max_per_view()),
             }
         )
+        reference_items = await references.list_for_execution(
+            identity, limit=effective_budget.max_preview_items
+        )
         context_view = ContextRenderer().render(
             spec=spec,
             execution=execution,
             state=state_snapshot,
             events=event_summaries,
             budget=effective_budget,
+            references=reference_items,
         )
         event_store.append(
             identity.execution_id,
@@ -195,8 +241,20 @@ class NativeMethodRuntime:
                     payload,
                     execution_id=identity.execution_id,
                     context_text=render_context_text(context_view),
+                    native_context=native_context,
                     on_validation_failure=record_validation_failure,
                 )
+            state_store.set_execution_status(
+                identity.execution_id,
+                NativeExecutionStatus.FINISHED,
+                events=(
+                    (
+                        NativeEventKind.EXECUTION_FINISHED,
+                        {"status": NativeExecutionStatus.FINISHED.value},
+                    ),
+                ),
+            )
+            return result
         except asyncio.CancelledError:
             await self._record_failure(
                 state_store,
@@ -228,16 +286,8 @@ class NativeMethodRuntime:
                 NativeExecutionStatus.FAILED,
             )
             raise
-
-        state_store.set_execution_status(
-            identity.execution_id, NativeExecutionStatus.FINISHED
-        )
-        event_store.append(
-            identity.execution_id,
-            NativeEventKind.EXECUTION_FINISHED,
-            {"status": NativeExecutionStatus.FINISHED.value},
-        )
-        return result
+        finally:
+            await self._revoke_references(references, identity.execution_id)
 
     async def _fail(
         self,
@@ -279,14 +329,20 @@ class NativeMethodRuntime:
                 NativeEventKind.VALIDATION_FAILED,
                 {"error_code": code, "summary": safe_summary},
             )
+        terminal_events = [
+            (
+                NativeEventKind.EXECUTION_FAILED,
+                {
+                    "error_code": code,
+                    "summary": safe_summary,
+                    "status": status.value,
+                },
+            )
+        ]
         state_store.set_execution_status(
             identity.execution_id,
             status,
             error_code=code,
             error_summary=safe_summary,
-        )
-        event_store.append(
-            identity.execution_id,
-            NativeEventKind.EXECUTION_FAILED,
-            {"error_code": code, "summary": safe_summary, "status": status.value},
+            events=tuple(terminal_events),
         )

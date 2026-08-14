@@ -6,17 +6,25 @@ from __future__ import annotations
 from code_puppy.agents.base_agent import BaseAgent
 
 from .contracts import MethodSpec
+from .execution import NativeExecutionContext
 
 
 class NativeInvocationAgent(BaseAgent):
     """A disposable ``BaseAgent`` shell that never mutates its parent."""
 
-    def __init__(self, parent: BaseAgent, spec: MethodSpec, prompt: str) -> None:
+    def __init__(
+        self,
+        parent: BaseAgent,
+        spec: MethodSpec,
+        prompt: str,
+        native_context: NativeExecutionContext | None = None,
+    ) -> None:
         super().__init__()
         self.parent = parent
         self.method_spec = spec
         self._method_prompt = prompt
         self._parent_agent_name = parent.name
+        self.native_context = native_context
 
     @property
     def name(self) -> str:

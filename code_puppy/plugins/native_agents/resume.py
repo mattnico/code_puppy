@@ -40,7 +40,11 @@ def inspect_resume(
             reason="execution_not_found",
         )
     now = now or datetime.now(timezone.utc)
-    retention = retention_days or store_retention_days()
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("resume inspection time must be timezone-aware")
+    if retention_days is not None and not 1 <= retention_days <= 3_650:
+        raise ValueError("retention days are outside the safe bound")
+    retention = store_retention_days() if retention_days is None else retention_days
     expired = now - record.created_at > timedelta(days=retention)
     state = store.get_state(execution_id)
     if expired:
@@ -48,6 +52,13 @@ def inspect_resume(
         eligible = False
     elif record.method_version != spec.version:
         reason = "method_version_changed"
+        eligible = False
+    elif spec.state_schema_name is not None and (
+        state is None
+        or state.schema_name != spec.state_schema_name
+        or state.schema_version != spec.state_schema_version
+    ):
+        reason = "state_schema_changed"
         eligible = False
     elif record.status is NativeExecutionStatus.RUNNING:
         reason = "interrupted_execution_requires_explicit_resume"

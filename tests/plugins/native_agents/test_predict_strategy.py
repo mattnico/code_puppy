@@ -13,6 +13,9 @@ from code_puppy.plugins.native_agents.predict import PredictStrategy
 async def test_predict_strategy_returns_declared_output_through_real_builder(
     monkeypatch,
 ):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.predict.is_enabled", lambda: True
+    )
     import code_puppy.agents._builder as builder
 
     monkeypatch.setattr(
@@ -55,6 +58,9 @@ async def test_predict_strategy_returns_declared_output_through_real_builder(
 
 
 async def test_predict_strategy_rejects_wrong_fake_output(monkeypatch):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.predict.is_enabled", lambda: True
+    )
     import code_puppy.plugins.native_agents.predict as predict
 
     class FakeResult:

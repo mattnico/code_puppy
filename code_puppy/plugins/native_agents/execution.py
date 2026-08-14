@@ -4,10 +4,44 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncIterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, AsyncIterator
 
-from .contracts import ExecutionIdentity
+from .contracts import ExecutionIdentity, MethodSpec
 from .errors import NativeContractError, NoActiveExecutionError
+
+if TYPE_CHECKING:
+    from .capabilities import CapabilityRegistry
+    from .context import ContextRenderer
+    from .events import EventService
+    from .reference_store import ReferenceStore
+    from .state import StateService
+
+
+@dataclass(frozen=True, slots=True)
+class NativeExecutionContext:
+    """Trusted host context for one execution; never persisted or model-visible."""
+
+    identity: ExecutionIdentity
+    method: MethodSpec
+    state: "StateService | None"
+    events: "EventService"
+    context: "ContextRenderer"
+    references: "ReferenceStore"
+    capabilities: "CapabilityRegistry"
+
+    @property
+    def execution_id(self) -> str:
+        return self.identity.execution_id
+
+    @property
+    def agent_name(self) -> str:
+        return self.identity.agent_name
+
+    @property
+    def session_id(self) -> str | None:
+        return self.identity.session_id
+
 
 _CURRENT_EXECUTION: ContextVar[ExecutionIdentity | None] = ContextVar(
     "native_current_execution", default=None

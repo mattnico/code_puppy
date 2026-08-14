@@ -95,8 +95,29 @@ class ReferenceStore:
             raise
         return handle
 
-    async def metadata(self, handle: ReferenceHandle | str) -> ReferenceHandle:
-        """Return untrusted metadata without exposing the live value."""
+    async def list_for_execution(
+        self, execution: ExecutionIdentity, *, limit: int = 100
+    ) -> list[ReferenceHandle]:
+        """Return bounded, owned metadata for one model context view."""
+
+        if not 0 <= limit <= 100:
+            raise ValueError("reference view limit is outside the safe bound")
+        await self.purge_expired()
+        async with self._lock:
+            return [
+                entry.handle
+                for entry in self._entries.values()
+                if self._is_owned(entry.handle, execution, None)
+            ][:limit]
+
+    async def metadata(
+        self,
+        handle: ReferenceHandle | str,
+        *,
+        execution: ExecutionIdentity | None = None,
+        expected_type: str | None = None,
+    ) -> ReferenceHandle:
+        """Return metadata only for the owning execution."""
 
         handle_id = self._coerce_handle_id(handle)
         now = datetime.now(timezone.utc)
@@ -110,6 +131,10 @@ class ReferenceStore:
                 else:
                     raise HandleUnavailableError("reference handle unavailable")
             else:
+                if execution is None or not self._is_owned(
+                    entry.handle, execution, expected_type
+                ):
+                    raise HandleUnavailableError("reference handle unavailable")
                 return entry.handle
         self._record_expired(expired)
         raise HandleUnavailableError("reference handle unavailable")
@@ -123,7 +148,9 @@ class ReferenceStore:
     ) -> ReferenceHandle:
         """Return metadata only after ownership/type/expiry checks."""
 
-        metadata = await self.metadata(handle)
+        metadata = await self.metadata(
+            handle, execution=execution, expected_type=expected_type
+        )
         if not self._is_owned(metadata, execution, expected_type):
             raise HandleUnavailableError("reference handle unavailable")
         return metadata

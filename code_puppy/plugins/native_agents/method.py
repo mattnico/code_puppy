@@ -5,16 +5,26 @@ from __future__ import annotations
 import ast
 import functools
 import inspect
+import re
 import textwrap
 from collections.abc import Mapping
 from typing import Any, get_type_hints
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .contracts import ContextBudget, MethodSpec, NativeStrategyName
 from .errors import NativeContractError, NativeRuntimeDisabledError
 
 SPEC_ATTRIBUTE = "__native_method_spec__"
+
+
+def _is_strict_boundary_model(model: Any) -> bool:
+    config = getattr(model, "model_config", {})
+    return (
+        isinstance(config, Mapping)
+        and config.get("extra") == "forbid"
+        and config.get("strict") is True
+    )
 
 
 def _annotation_matches(annotation: Any, expected: type[BaseModel]) -> bool:
@@ -66,18 +76,37 @@ def _validate_declaration(
 ) -> None:
     if not inspect.iscoroutinefunction(function):
         raise NativeContractError("native methods must be declared with async def")
-    if not issubclass(input_type, BaseModel) or not issubclass(output_type, BaseModel):
+    try:
+        valid_models = (
+            issubclass(input_type, BaseModel)
+            and issubclass(output_type, BaseModel)
+            and (state_type is None or issubclass(state_type, BaseModel))
+        )
+    except TypeError as exc:
+        raise NativeContractError(
+            "native input, output, and state types must be Pydantic models"
+        ) from exc
+    if not valid_models:
         raise NativeContractError(
             "native input and output types must be Pydantic models"
         )
-    if state_type is not None and not issubclass(state_type, BaseModel):
-        raise NativeContractError("native state type must be a Pydantic model")
+    if not _is_strict_boundary_model(input_type):
+        raise NativeContractError(
+            "native input models must use strict=True and extra='forbid'"
+        )
+    if not _is_strict_boundary_model(output_type):
+        raise NativeContractError(
+            "native output models must use strict=True and extra='forbid'"
+        )
+    if state_type is not None and not _is_strict_boundary_model(state_type):
+        raise NativeContractError(
+            "native state models must use strict=True and extra='forbid'"
+        )
     if strategy != NativeStrategyName.PREDICT and strategy != "predict":
         raise NativeContractError("the codeact strategy is not available in Tier A")
     if any(
         not isinstance(capability, str)
-        or not capability
-        or any(character.isspace() for character in capability)
+        or not re.fullmatch(r"[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*", capability)
         for capability in allowed_capabilities
     ):
         raise NativeContractError("capability names must be stable identifiers")
@@ -127,6 +156,9 @@ def native_method(
     context_budget: ContextBudget | None = None,
     name: str | None = None,
     capabilities: tuple[str, ...] = (),
+    memory_opt_in: bool = False,
+    state_factory: Any = None,
+    state_schema_version: int = 1,
 ):
     """Decorate one explicit async typed native method declaration."""
 
@@ -153,6 +185,16 @@ def native_method(
             max_validation_repairs=max_validation_repairs,
         )
         method_name = name or function.__name__
+        if version < 1:
+            raise NativeContractError("native method version must be positive")
+        if not 1 <= state_schema_version <= 10_000:
+            raise NativeContractError("state schema version is outside the safe bound")
+        if state_factory is not None and (
+            state_type is None or not callable(state_factory)
+        ):
+            raise NativeContractError(
+                "state_factory requires a callable and a declared state_type"
+            )
         if not method_name or method_name.startswith("_"):
             raise NativeContractError(
                 "native method names must be public and non-empty"
@@ -168,9 +210,12 @@ def native_method(
             input_type=input_type,
             output_type=output_type,
             state_type=state_type,
+            state_schema_version=state_schema_version,
             max_validation_repairs=max_validation_repairs,
             context_budget=budget,
             instructions=inspect.getdoc(function) or "",
+            memory_opt_in=memory_opt_in,
+            state_factory=state_factory,
         )
 
         @functools.wraps(function)
@@ -184,7 +229,15 @@ def native_method(
                 raise NativeRuntimeDisabledError(
                     "native method runtime is not configured for this agent"
                 )
-            return await runtime.execute(self, spec, request)
+            try:
+                validated_request = input_type.model_validate(
+                    request.model_dump(mode="python")
+                )
+            except (AttributeError, TypeError, ValidationError) as exc:
+                raise NativeContractError(
+                    f"native method {method_name!r} received invalid input"
+                ) from exc
+            return await runtime.execute(self, spec, validated_request)
 
         setattr(invoke, SPEC_ATTRIBUTE, spec)
         return invoke

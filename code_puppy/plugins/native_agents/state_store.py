@@ -174,7 +174,26 @@ class StateStore:
         *,
         error_code: str | None = None,
         error_summary: str | None = None,
+        events: tuple[tuple[NativeEventKind, dict[str, Any]], ...] = (),
     ) -> NativeExecutionRecord:
+        if not isinstance(status, NativeExecutionStatus):
+            raise StateSchemaError("native execution status is invalid")
+        if error_code is not None and (
+            not isinstance(error_code, str)
+            or not error_code
+            or len(error_code) > 200
+            or any(character.isspace() for character in error_code)
+        ):
+            raise StateSchemaError("native execution error code is invalid")
+        if error_summary is not None:
+            try:
+                error_summary = redact_payload(
+                    {"summary": str(error_summary).replace("\n", " ")[:2_000]}
+                )["summary"]
+            except Exception as exc:
+                raise StateSchemaError(
+                    "native execution error summary is invalid"
+                ) from exc
         now = utc_now()
         started_at = timestamp(now) if status is NativeExecutionStatus.RUNNING else None
         finished_at = (
@@ -196,10 +215,10 @@ class StateStore:
             ).fetchone()
             if current_row is None:
                 raise StateSchemaError("native execution does not exist")
-            current_status = NativeExecutionStatus(current_row[0])
             try:
+                current_status = NativeExecutionStatus(current_row[0])
                 validate_transition(current_status, status)
-            except ValueError as exc:
+            except (ValueError, TypeError) as exc:
                 raise StateSchemaError(
                     "stored native execution status is invalid"
                 ) from exc
@@ -226,6 +245,15 @@ class StateStore:
             )
             if result.rowcount != 1:
                 raise StateSchemaError("native execution does not exist")
+            if events:
+                for event_kind, event_payload in events:
+                    append_event_on_connection(
+                        connection,
+                        execution_id,
+                        event_kind,
+                        event_payload,
+                        occurred_at=now,
+                    )
             connection.commit()
             row = connection.execute(
                 "SELECT * FROM native_executions WHERE execution_id = ?",
