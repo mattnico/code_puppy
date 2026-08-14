@@ -41,3 +41,13 @@ def test_registration_does_not_advertise_generic_tools():
         for callback in get_callbacks("register_agent_tools")
     )
     assert get_feature_capability("unknown-native-feature") is False
+
+
+def test_unreadable_feature_config_fails_closed(monkeypatch):
+    def unreadable(_key):
+        raise OSError("config unavailable")
+
+    monkeypatch.setattr(config_module, "get_value", unreadable)
+    assert config_module.is_enabled() is False
+    assert config_module.diagnostics_enabled() is False
+    assert config_module.context_max_chars() == 12_000

@@ -28,13 +28,21 @@ def _truthy(value: object, *, default: bool = False) -> bool:
 
 
 def is_enabled() -> bool:
-    """Return the master flag; missing and invalid values are safely off."""
+    """Return the master flag; missing, invalid, or unreadable values are off."""
 
-    return _truthy(get_value(_ENABLED_KEY))
+    try:
+        raw = get_value(_ENABLED_KEY)
+    except Exception:
+        return False
+    return _truthy(raw)
 
 
 def diagnostics_enabled() -> bool:
-    return is_enabled() and _truthy(get_value(_DIAGNOSTICS_KEY))
+    try:
+        raw = get_value(_DIAGNOSTICS_KEY)
+    except Exception:
+        return False
+    return is_enabled() and _truthy(raw)
 
 
 def codeact_enabled() -> bool:
@@ -60,7 +68,10 @@ def bounded_int(name: str) -> int:
     """Read a bounded integer setting, falling back on invalid input."""
 
     default, minimum, maximum = _DEFAULTS[name]
-    raw = get_value(name)
+    try:
+        raw = get_value(name)
+    except Exception:
+        return default
     try:
         value = int(raw) if raw is not None else default
     except (TypeError, ValueError):
