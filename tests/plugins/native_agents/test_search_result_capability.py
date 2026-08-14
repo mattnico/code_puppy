@@ -77,7 +77,9 @@ def test_search_adapter_enforces_bounded_operations_and_safe_prefixes():
         == 2
     )
     with pytest.raises(ValueError):
-        _filter_prefix(resource, SearchPrefixRequest(prefix="../"), execution)
+        _filter_prefix(resource, SearchPrefixRequest(prefix="src/../tests"), execution)
+    with pytest.raises(ValueError):
+        _filter_prefix(resource, SearchPrefixRequest(prefix="C:/repo"), execution)
     with pytest.raises(ValidationError):
         SearchPageRequest(limit=51)
 

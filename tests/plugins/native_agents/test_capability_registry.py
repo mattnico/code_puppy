@@ -16,6 +16,7 @@ from code_puppy.plugins.native_agents.contracts import (
 from code_puppy.plugins.native_agents.errors import (
     CapabilityDeniedError,
     CapabilityValidationError,
+    HandleUnavailableError,
 )
 from code_puppy.plugins.native_agents.events import EventStore
 from code_puppy.plugins.native_agents.reference_store import ReferenceStore
@@ -140,3 +141,77 @@ async def test_registry_denies_undeclared_and_invalid_operations_before_adapter(
             method=method,
             execution=execution,
         )
+
+
+@pytest.mark.asyncio
+async def test_registry_audits_unavailable_handles_before_adapter(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, events, references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+    called = False
+
+    def handler(*args):
+        nonlocal called
+        called = True
+        return Result(count=1)
+
+    registry.register(spec, handler)
+    other_execution = execution.model_copy(update={"execution_id": "other"})
+    StateStore(str(tmp_path / "native.sqlite3"), initialize=False).create_execution(
+        other_execution,
+        method_version=1,
+        strategy=NativeStrategyName.PREDICT,
+    )
+    with pytest.raises(HandleUnavailableError):
+        await registry.invoke(
+            spec.name,
+            handle,
+            Request(limit=1),
+            method=method,
+            execution=other_execution,
+        )
+    assert called is False
+    assert (
+        events.list_events(other_execution.execution_id, limit=10)[-1].kind
+        is NativeEventKind.CAPABILITY_DENIED
+    )
+
+
+@pytest.mark.asyncio
+async def test_registry_normalizes_handler_failures_and_audits_them(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, events, references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+
+    def handler(*args):
+        raise RuntimeError("private implementation detail")
+
+    registry.register(spec, handler)
+    with pytest.raises(CapabilityValidationError, match="capability invocation failed"):
+        await registry.invoke(
+            spec.name,
+            handle,
+            Request(limit=1),
+            method=method,
+            execution=execution,
+        )
+    assert (
+        events.list_events(execution.execution_id, limit=10)[-1].payload["outcome"]
+        == "failed"
+    )
+    assert (
+        "private implementation"
+        not in events.list_events(execution.execution_id, limit=10)[
+            -1
+        ].model_dump_json()
+    )

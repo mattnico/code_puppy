@@ -1,4 +1,5 @@
 {
+  "wiggum.judge.invalid_output": "Judge returned an invalid structured verdict ({output_type}); abstaining.",
   "native_agents.demo.display_name": "Native Reviewer",
   "native_agents.demo.description": "Reviews supplied change text and returns typed findings.",
   "native_agents.command.disabled": "Native agents are disabled. Enable native_agents_enabled to use them.",

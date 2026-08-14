@@ -204,8 +204,12 @@ class NativeAgentMixin:
                 spec = getattr(member, SPEC_ATTRIBUTE, None)
                 if spec is None:
                     continue
+                if attribute_name in registry:
+                    raise NativeContractError(
+                        f"duplicate native method name {attribute_name!r}"
+                    )
                 previous = identifiers.get(spec.name)
-                if previous is not None and previous != attribute_name:
+                if previous is not None:
                     raise NativeContractError(
                         f"duplicate native method identifier {spec.name!r}"
                     )

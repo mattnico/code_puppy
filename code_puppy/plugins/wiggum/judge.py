@@ -13,14 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_ai import Agent, RunContext, ToolOutput, UsageLimits
 
 from code_puppy.agents._history import stringify_part
 from code_puppy.agents.agent_manager import load_agent
+from code_puppy.i18n import t
 from code_puppy.model_factory import ModelFactory, make_model_settings
 from code_puppy.model_utils import prepare_prompt_for_model
 from code_puppy.tools.subagent_context import subagent_context
@@ -180,6 +182,40 @@ Use it when the latest response is not enough to confidently judge completion.
 """
 
 
+def _invalid_output_judgement(judge_config: JudgeConfig, output: Any) -> GoalJudgement:
+    """Convert provider fallbacks into an abstention, never a judge crash."""
+
+    try:
+        raw = json.dumps(output, default=str)
+    except (TypeError, ValueError):
+        raw = repr(output)
+    return GoalJudgement(
+        judge_name=judge_config.name,
+        complete=False,
+        notes=t(
+            "wiggum.judge.invalid_output",
+            output_type=type(output).__name__,
+        ),
+        raw_response=raw,
+        abstained=True,
+    )
+
+
+def _normalize_judge_output(
+    judge_config: JudgeConfig, output: Any
+) -> GoalJudgeOutput | GoalJudgement:
+    """Accept only the declared verdict model or a strictly shaped mapping."""
+
+    if isinstance(output, GoalJudgeOutput):
+        return output
+    if isinstance(output, Mapping):
+        try:
+            return GoalJudgeOutput.model_validate(output)
+        except ValidationError:
+            return _invalid_output_judgement(judge_config, output)
+    return _invalid_output_judgement(judge_config, output)
+
+
 async def judge_goal(
     *,
     judge_config: JudgeConfig,
@@ -282,18 +318,13 @@ async def judge_goal(
             abstained=True,
         )
 
-    if hasattr(output, "model_dump_json"):
-        raw = output.model_dump_json()
-        complete = output.complete
-        notes = output.notes
-    else:
-        raw = json.dumps(output)
-        complete = bool(output.get("complete"))
-        notes = str(output.get("notes", ""))
+    normalized = _normalize_judge_output(judge_config, output)
+    if isinstance(normalized, GoalJudgement):
+        return normalized
 
     return GoalJudgement(
         judge_name=judge_config.name,
-        complete=complete,
-        notes=notes,
-        raw_response=raw,
+        complete=normalized.complete,
+        notes=normalized.notes,
+        raw_response=normalized.model_dump_json(),
     )

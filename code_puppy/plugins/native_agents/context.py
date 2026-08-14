@@ -104,23 +104,38 @@ class ContextRenderer:
         used = 0
         view_truncated = False
         for block in blocks:
-            remaining = budget.max_chars - used
+            separator = 2 if selected else 0
+            remaining = budget.max_chars - used - separator
             if remaining <= 0:
                 view_truncated = True
                 break
+            rendered_block = _render_block(block)
             content = block.content
             block_truncated = block.truncated
-            if len(content) > remaining:
+            if len(rendered_block) > remaining:
                 marker = "\n[context truncated; retrieve approved bounded data]"
-                content = content[: max(0, remaining - len(marker))] + marker
+                heading = f"## {block.name}\n"
+                content_budget = remaining - len(heading)
+                if content_budget <= 0:
+                    view_truncated = True
+                    break
+                if content_budget < len(marker):
+                    content = marker[:content_budget]
+                else:
+                    content = content[: content_budget - len(marker)] + marker
                 block_truncated = True
                 view_truncated = True
+                rendered_block = _render_block(
+                    block.model_copy(
+                        update={"content": content, "truncated": block_truncated}
+                    )
+                )
             selected.append(
                 block.model_copy(
                     update={"content": content, "truncated": block_truncated}
                 )
             )
-            used += len(content)
+            used += separator + len(rendered_block)
             if block_truncated:
                 break
         if len(selected) < len(blocks):
@@ -195,7 +210,11 @@ class ContextRenderer:
         return f"{event.sequence}: {event.kind.value} — {event.summary}"
 
 
+def _render_block(block: ContextBlock) -> str:
+    return f"## {block.name}\n{block.content}"
+
+
 def render_context_text(view: NativeContextView) -> str:
     """Render a view without exposing raw storage structure."""
 
-    return "\n\n".join(f"## {block.name}\n{block.content}" for block in view.blocks)
+    return "\n\n".join(_render_block(block) for block in view.blocks)

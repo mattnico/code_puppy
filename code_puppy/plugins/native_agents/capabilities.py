@@ -21,6 +21,7 @@ from .errors import (
     CapabilityDeniedError,
     CapabilityNotFoundError,
     CapabilityValidationError,
+    HandleUnavailableError,
 )
 from .events import EventStore
 from .reference_store import ReferenceStore, handle_id_hash
@@ -68,8 +69,10 @@ class CapabilityRegistry:
         spec, handler = self._capabilities.get(name, (None, None))
         if spec is None or handler is None:
             raise CapabilityNotFoundError("capability is unavailable")
-        metadata = await self.references.metadata(handle)
-        hashed_id = handle_id_hash(metadata.handle_id)
+        supplied_id = (
+            handle.handle_id if isinstance(handle, ReferenceHandle) else str(handle)
+        )
+        hashed_id = handle_id_hash(supplied_id)
         self._event(
             execution.execution_id,
             NativeEventKind.CAPABILITY_REQUESTED,
@@ -79,6 +82,24 @@ class CapabilityRegistry:
                 "handle_id_hash": hashed_id,
             },
         )
+        try:
+            metadata = await self.references.describe(
+                handle,
+                execution=execution,
+                expected_type=spec.resource_type,
+            )
+        except HandleUnavailableError:
+            self._event(
+                execution.execution_id,
+                NativeEventKind.CAPABILITY_DENIED,
+                {
+                    "capability": spec.name,
+                    "effect": spec.effect.value,
+                    "handle_id_hash": hashed_id,
+                    "reason": "handle_unavailable",
+                },
+            )
+            raise
         decision = self.policy.authorize(
             method=method,
             execution=execution,
@@ -151,6 +172,18 @@ class CapabilityRegistry:
                 },
             )
             raise CapabilityValidationError("capability result is invalid") from exc
+        except Exception as exc:
+            self._event(
+                execution.execution_id,
+                NativeEventKind.CAPABILITY_COMPLETED,
+                {
+                    "capability": spec.name,
+                    "handle_id_hash": hashed_id,
+                    "outcome": "failed",
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            raise CapabilityValidationError("capability invocation failed") from exc
         self._event(
             execution.execution_id,
             NativeEventKind.CAPABILITY_COMPLETED,

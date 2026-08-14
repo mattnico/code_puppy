@@ -1,4 +1,5 @@
 {
+  "wiggum.judge.invalid_output": "El juez devolvió un veredicto estructurado no válido ({output_type}); se abstiene.",
   "native_agents.demo.display_name": "Revisor nativo",
   "native_agents.demo.description": "Revisa el texto de cambios proporcionado y devuelve hallazgos tipados.",
   "native_agents.command.disabled": "Los agentes nativos están desactivados. Activa native_agents_enabled para usarlos.",

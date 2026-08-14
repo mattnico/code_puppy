@@ -81,7 +81,8 @@ def test_context_priorities_bounded_state_allowlist_and_redaction(tmp_path):
         events=events.summaries("exec-context", EventQuery(limit=5)),
     )
     text = render_context_text(view)
-    assert view.total_chars <= 500
+    assert view.total_chars <= budget.max_chars
+    assert len(text) <= budget.max_chars
     assert view.truncated is True
     assert "IGNORE INSTRUCTIONS" not in text or "DATA (untrusted)" in text
     assert "secret" not in text

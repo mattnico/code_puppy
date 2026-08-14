@@ -1,13 +1,18 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
 
 from code_puppy.plugins.native_agents.contracts import (
     ExecutionIdentity,
+    NativeEventKind,
+    NativeStrategyName,
     ReferencePreview,
 )
 from code_puppy.plugins.native_agents.errors import HandleUnavailableError
+from code_puppy.plugins.native_agents.events import EventStore
 from code_puppy.plugins.native_agents.reference_store import ReferenceStore
+from code_puppy.plugins.native_agents.state_store import StateStore
 
 
 def _execution(name: str, session: str = "session"):
@@ -60,8 +65,6 @@ async def test_handles_are_opaque_scoped_and_expiring():
         preview=ReferencePreview(title="expired", summary="expired"),
         execution=execution,
     )
-    import asyncio
-
     await asyncio.sleep(0.01)
     with pytest.raises(HandleUnavailableError):
         await expired_store.resolve(
@@ -82,4 +85,31 @@ async def test_revoke_and_purge_release_live_values():
     await store.revoke_execution(execution.execution_id)
     with pytest.raises(HandleUnavailableError):
         await store.resolve(handle, execution=execution, expected_type="search_results")
-    assert await store.purge_expired() == 0
+
+
+@pytest.mark.asyncio
+async def test_expiry_cleanup_is_audited_without_persisting_live_values(tmp_path):
+    path = tmp_path / "native.sqlite3"
+    state = StateStore(str(path))
+    execution = _execution("exec-expiry")
+    state.create_execution(
+        execution,
+        method_version=1,
+        strategy=NativeStrategyName.PREDICT,
+    )
+    events = EventStore(str(path))
+    store = ReferenceStore(event_store=events, default_ttl=timedelta(microseconds=1))
+    handle = await store.create(
+        resource_type="search_results",
+        value={"secret": "live"},
+        preview=ReferencePreview(title="results", summary="one"),
+        execution=execution,
+    )
+    await asyncio.sleep(0.01)
+    assert await store.purge_expired() == 1
+    assert (
+        events.list_events(execution.execution_id, limit=10)[-1].kind
+        is NativeEventKind.HANDLE_EXPIRED
+    )
+    with pytest.raises(HandleUnavailableError):
+        await store.metadata(handle)

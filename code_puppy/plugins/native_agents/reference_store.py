@@ -72,8 +72,10 @@ class ReferenceStore:
             preview=preview,
         )
         async with self._lock:
-            await self._purge_expired_locked(now)
+            expired = await self._purge_expired_locked(now)
             self._entries[handle.handle_id] = _Entry(handle=handle, value=value)
+        for old_handle in expired:
+            self._record_expired(old_handle)
         try:
             self._append_event(
                 execution.execution_id,
@@ -95,15 +97,21 @@ class ReferenceStore:
     async def metadata(self, handle: ReferenceHandle | str) -> ReferenceHandle:
         """Return untrusted metadata without exposing the live value."""
 
-        handle_id = handle.handle_id if isinstance(handle, ReferenceHandle) else handle
+        handle_id = self._coerce_handle_id(handle)
         now = datetime.now(timezone.utc)
+        expired: ReferenceHandle | None = None
         async with self._lock:
             entry = self._entries.get(handle_id)
             if entry is None or entry.handle.expires_at <= now:
                 if entry is not None:
+                    expired = entry.handle
                     self._entries.pop(handle_id, None)
-                raise HandleUnavailableError("reference handle unavailable")
-            return entry.handle
+                else:
+                    raise HandleUnavailableError("reference handle unavailable")
+            else:
+                return entry.handle
+        self._record_expired(expired)
+        raise HandleUnavailableError("reference handle unavailable")
 
     async def describe(
         self,
@@ -126,7 +134,7 @@ class ReferenceStore:
         execution: ExecutionIdentity,
         expected_type: str,
     ) -> Any:
-        handle_id = handle.handle_id if isinstance(handle, ReferenceHandle) else handle
+        handle_id = self._coerce_handle_id(handle)
         now = datetime.now(timezone.utc)
         async with self._lock:
             entry = self._entries.get(handle_id)
@@ -139,14 +147,7 @@ class ReferenceStore:
                 expired = entry.handle
             else:
                 return entry.value
-        self._append_event(
-            execution.execution_id,
-            NativeEventKind.HANDLE_EXPIRED,
-            {
-                "resource_type": expired.resource_type,
-                "handle_id_hash": handle_id_hash(expired.handle_id),
-            },
-        )
+        self._record_expired(expired)
         raise HandleUnavailableError("reference handle unavailable")
 
     async def revoke_execution(self, execution_id: str) -> None:
@@ -167,17 +168,40 @@ class ReferenceStore:
 
     async def purge_expired(self) -> int:
         async with self._lock:
-            return await self._purge_expired_locked(datetime.now(timezone.utc))
+            doomed = await self._purge_expired_locked(datetime.now(timezone.utc))
+        for handle in doomed:
+            self._record_expired(handle)
+        return len(doomed)
 
-    async def _purge_expired_locked(self, now: datetime) -> int:
+    async def _purge_expired_locked(self, now: datetime) -> list[ReferenceHandle]:
         doomed = [
-            handle_id
-            for handle_id, entry in self._entries.items()
+            entry.handle
+            for entry in self._entries.values()
             if entry.handle.expires_at <= now
         ]
-        for handle_id in doomed:
-            self._entries.pop(handle_id, None)
-        return len(doomed)
+        for handle in doomed:
+            self._entries.pop(handle.handle_id, None)
+        return doomed
+
+    def _record_expired(self, handle: ReferenceHandle | None) -> None:
+        if handle is None:
+            return
+        self._append_event(
+            handle.execution_id,
+            NativeEventKind.HANDLE_EXPIRED,
+            {
+                "resource_type": handle.resource_type,
+                "handle_id_hash": handle_id_hash(handle.handle_id),
+            },
+        )
+
+    @staticmethod
+    def _coerce_handle_id(handle: ReferenceHandle | str) -> str:
+        if isinstance(handle, ReferenceHandle):
+            return handle.handle_id
+        if isinstance(handle, str) and handle:
+            return handle
+        raise HandleUnavailableError("reference handle unavailable")
 
     @staticmethod
     def _is_owned(

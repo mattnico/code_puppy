@@ -35,7 +35,9 @@ _SECRET_KEY_RE = re.compile(
 )
 _SECRET_VALUE_RE = re.compile(
     r"(?i)\b(?:bearer\s+|basic\s+)[a-z0-9._~+/=-]{8,}|"
-    r"(?:https?|postgres(?:ql)?|mysql)://[^\s]+:[^\s]+@[^\s]+"
+    r"(?:https?|postgres(?:ql)?|mysql)://[^\s]+:[^\s]+@[^\s]+|"
+    r"(?:api[_-]?key|access[_-]?token|authorization|password|secret)"
+    r"\s*[:=]\s*[^\s,;]+"
 )
 _REDACTED = "[REDACTED]"
 

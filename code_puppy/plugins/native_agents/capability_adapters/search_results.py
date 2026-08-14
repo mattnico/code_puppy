@@ -97,16 +97,32 @@ def _sample(
 
 def _normalized_prefix(prefix: str) -> str:
     candidate = prefix.replace("\\", "/")
-    if candidate.startswith("/") or candidate.startswith("~"):
-        raise ValueError("path prefix must be relative")
+    _validate_relative_path(candidate)
     normalized = posixpath.normpath(candidate)
-    if normalized in {".", ""} or normalized == ".." or normalized.startswith("../"):
-        raise ValueError("path prefix must remain within the result root")
+    if normalized in {".", ""}:
+        raise ValueError("path prefix must not be empty")
     return normalized.rstrip("/") + "/"
 
 
 def _normalized_match_path(path: str) -> str:
-    return posixpath.normpath(path.replace("\\", "/")).lstrip("./") + "/"
+    candidate = path.replace("\\", "/")
+    _validate_relative_path(candidate)
+    normalized = posixpath.normpath(candidate)
+    if normalized in {".", ""}:
+        raise ValueError("search match path must not be empty")
+    return normalized.rstrip("/") + "/"
+
+
+def _validate_relative_path(path: str) -> None:
+    if (
+        not path
+        or path.startswith("/")
+        or path.startswith("~")
+        or (len(path) >= 3 and path[1] == ":" and path[2] == "/")
+    ):
+        raise ValueError("path must be relative")
+    if any(component == ".." for component in path.split("/")):
+        raise ValueError("path must remain within the result root")
 
 
 def _first_component(path: str) -> str:

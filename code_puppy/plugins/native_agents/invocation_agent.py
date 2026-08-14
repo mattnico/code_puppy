@@ -44,6 +44,9 @@ class NativeInvocationAgent(BaseAgent):
     def get_available_tools(self) -> list[str]:
         return list(self.parent.get_available_tools())
 
+    def get_tools_config(self):
+        """Delegate static tool configuration without sharing mutable state."""
+
         config = self.parent.get_tools_config()
         return dict(config) if config else None
 
