@@ -16,6 +16,7 @@ from .contracts import (
     NativeContextView,
     NativeExecutionRecord,
     NativeStateEnvelope,
+    ReferenceHandle,
 )
 
 _SECRET_NAME = re.compile(
@@ -34,6 +35,7 @@ class ContextRenderer:
         state: NativeStateEnvelope | None,
         events: Iterable[EventSummary],
         budget: ContextBudget | None = None,
+        references: Iterable[ReferenceHandle] = (),
     ) -> NativeContextView:
         budget = budget or spec.context_budget
         blocks = [
@@ -46,7 +48,8 @@ class ContextRenderer:
                 + spec.strategy.value
                 + " output="
                 + spec.output_schema_name
-                + " capabilities=none",
+                + " capabilities="
+                + (", ".join(spec.allowed_capabilities) or "none"),
                 "method",
                 budget.max_chars,
             ),
@@ -78,6 +81,20 @@ class ContextRenderer:
                     60,
                     "\n".join(self._event_line(event) for event in event_items),
                     "events",
+                    budget.max_chars,
+                )
+            )
+        reference_items = list(references)[: budget.max_preview_items]
+        if reference_items:
+            blocks.append(
+                self._block(
+                    "references",
+                    70,
+                    "\n".join(
+                        self._reference_line(reference, spec.allowed_capabilities)
+                        for reference in reference_items
+                    ),
+                    "references",
                     budget.max_chars,
                 )
             )
@@ -155,6 +172,22 @@ class ContextRenderer:
         )
         return ContextRenderer._block(
             "typed_state", 80, content, "state", min(max_chars, 4_000)
+        )
+
+    @staticmethod
+    def _reference_line(
+        reference: ReferenceHandle, capabilities: tuple[str, ...]
+    ) -> str:
+        operations = [
+            name
+            for name in capabilities
+            if name.startswith(reference.resource_type + ".")
+        ]
+        allowed = ", ".join(operations) if operations else "none"
+        return (
+            f"- {reference.preview.title!r}: {(reference.preview.count or 0):,} "
+            f"items; sample={len(reference.preview.sample)}. "
+            f"Allowed operations: {allowed}. This is a bounded preview, not the full data set."
         )
 
     @staticmethod

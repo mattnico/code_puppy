@@ -6,7 +6,9 @@ registering callbacks at import time. The callback entry point lives in
 """
 
 from .contracts import (
+    AuthorizationDecision,
     CapabilityEffect,
+    CapabilitySpec,
     ContextBlock,
     ContextBudget,
     EventQuery,
@@ -19,10 +21,26 @@ from .contracts import (
     NativeExecutionStatus,
     NativeStateEnvelope,
     NativeStrategyName,
+    ReferenceHandle,
+    ReferencePreview,
+    SearchCountRequest,
+    SearchCounts,
+    SearchHandleResult,
+    SearchMatch,
+    SearchPage,
+    SearchPageRequest,
+    SearchPathCount,
+    SearchPrefixRequest,
+    SearchResultSet,
+    SearchSampleRequest,
 )
 from .events import EventService, EventStore
 from .errors import (
+    CapabilityDeniedError,
+    CapabilityNotFoundError,
+    CapabilityValidationError,
     EventStoreError,
+    HandleUnavailableError,
     NativeAgentError,
     NativeContractError,
     NativeOutputValidationError,
@@ -33,7 +51,12 @@ from .errors import (
 )
 
 __all__ = [
+    "AuthorizationDecision",
+    "CapabilityDeniedError",
     "CapabilityEffect",
+    "CapabilityNotFoundError",
+    "CapabilitySpec",
+    "CapabilityValidationError",
     "ContextBlock",
     "ContextBudget",
     "EventQuery",
@@ -42,6 +65,7 @@ __all__ = [
     "EventStoreError",
     "EventSummary",
     "ExecutionIdentity",
+    "HandleUnavailableError",
     "MethodSpec",
     "NativeAgentError",
     "NativeContractError",
@@ -54,6 +78,18 @@ __all__ = [
     "NativeStateEnvelope",
     "NativeStorageUnavailableError",
     "NativeStrategyName",
+    "ReferenceHandle",
+    "ReferencePreview",
+    "SearchCountRequest",
+    "SearchCounts",
+    "SearchHandleResult",
+    "SearchMatch",
+    "SearchPage",
+    "SearchPageRequest",
+    "SearchPathCount",
+    "SearchPrefixRequest",
+    "SearchResultSet",
+    "SearchSampleRequest",
     "StateConflictError",
     "StateSchemaError",
 ]

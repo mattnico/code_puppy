@@ -92,5 +92,5 @@ def test_declarations_reject_codeact_and_capabilities():
             strategy="predict",
             input_type=Input,
             output_type=Output,
-            capabilities=("read",),
+            capabilities=("bad capability",),
         )(declared)

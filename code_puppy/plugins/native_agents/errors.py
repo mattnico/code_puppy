@@ -37,5 +37,21 @@ class NativeStorageUnavailableError(NativeAgentError):
     code = "native_storage_unavailable"
 
 
+class HandleUnavailableError(NativeAgentError):
+    code = "handle_unavailable"
+
+
+class CapabilityDeniedError(NativeAgentError):
+    code = "capability_denied"
+
+
+class CapabilityNotFoundError(NativeAgentError):
+    code = "capability_not_found"
+
+
+class CapabilityValidationError(NativeAgentError):
+    code = "capability_validation_failed"
+
+
 class NoActiveExecutionError(NativeAgentError):
     code = "no_active_execution"

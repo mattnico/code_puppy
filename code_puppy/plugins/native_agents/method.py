@@ -74,8 +74,13 @@ def _validate_declaration(
         raise NativeContractError("native state type must be a Pydantic model")
     if strategy != NativeStrategyName.PREDICT and strategy != "predict":
         raise NativeContractError("the codeact strategy is not available in Tier A")
-    if allowed_capabilities:
-        raise NativeContractError("capabilities are not available before Phase 4")
+    if any(
+        not isinstance(capability, str)
+        or not capability
+        or any(character.isspace() for character in capability)
+        for capability in allowed_capabilities
+    ):
+        raise NativeContractError("capability names must be stable identifiers")
     if not 0 <= max_validation_repairs <= 3:
         raise NativeContractError("validation repairs must be between 0 and 3")
     signature = inspect.signature(function)

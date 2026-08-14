@@ -220,3 +220,28 @@ follow-up asks the durable renderer for current context instead of trusting a
 compacted transcript. `inspect_resume` reports terminal/interrupted status,
 retention, and method-version eligibility but never automatically replays a
 crashed model call.
+
+## Phase 4 opaque references and capabilities
+
+Phase 4 adds `ReferenceStore`, `CapabilityRegistry`, `CapabilityPolicy`, and
+one real read-only `search_results` adapter. Reference handles use secure
+random IDs and contain only resource type, execution/session ownership,
+expiry, and a bounded preview. Live values stay in an in-memory host mapping;
+no raw object, pickle, filesystem handle, shell handle, MCP client, or secret
+is persisted or placed in a prompt. Unknown, expired, wrong-type, and
+cross-execution handles fail with the same `HandleUnavailableError`.
+
+Capability names are explicit namespaced declarations with strict Pydantic
+request/response models. Policy checks feature enablement, exact method
+allowlisting, resource/owner scope, and effect class before resource
+resolution. Tier A permits only `observe`, `compute`, and `propose`; modify,
+execute, and secret effects are denied. Requested, denied, and completed
+capability attempts are recorded with hashed handle IDs and bounded metadata.
+
+The initial adapter accepts host-created `SearchResultSet` values and supports
+bounded paging, relative-prefix filtering into a derived handle, deterministic
+path grouping, and bounded sampling. It performs no filesystem or shell work;
+creation must come from an already-approved host search result. Context previews
+show a symbolic description and allowed operation names, never the opaque
+handle ID or full result set. Reference cleanup is execution-scoped and
+idempotent.
