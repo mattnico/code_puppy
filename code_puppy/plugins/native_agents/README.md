@@ -271,7 +271,7 @@ ever introduced later. Preserve redacted execution evidence, revoke live
 handles, add a regression/security test, and require a new security review
 before any later CodeAct work.
 
-Release evidence in this branch: 70 deterministic native-agent tests, 264
+Release evidence in this branch: 73 deterministic native-agent tests, 1,084
 normal-agent/i18n/builder/compaction regression tests, full Ruff check/format,
 and no external model credentials. The test matrix covers success, invalid
 contracts, bounded validation failure, cancellation, storage failure, state

@@ -27,13 +27,22 @@ def _is_strict_boundary_model(model: Any) -> bool:
     )
 
 
-def _annotation_matches(annotation: Any, expected: type[BaseModel]) -> bool:
+def _annotation_matches(
+    function: Any,
+    annotation: Any,
+    name: str,
+    expected: type[BaseModel],
+) -> bool:
     if annotation is expected:
         return True
-    return (
-        isinstance(annotation, str)
-        and annotation.rsplit(".", 1)[-1] == expected.__name__
-    )
+    if not isinstance(annotation, str):
+        return False
+    try:
+        return get_type_hints(function).get(name) is expected
+    except (NameError, TypeError) as exc:
+        raise NativeContractError(
+            f"native {name} annotation cannot be resolved"
+        ) from exc
 
 
 def _is_stub(function: Any) -> bool:
@@ -121,24 +130,20 @@ def _validate_declaration(
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
     }:
         raise NativeContractError("native input must be one positional model")
-    if not _annotation_matches(parameters[1].annotation, input_type):
-        try:
-            hints = get_type_hints(function)
-        except (NameError, TypeError) as exc:
-            raise NativeContractError(
-                "native input annotation cannot be resolved"
-            ) from exc
-        if hints.get(parameters[1].name) is not input_type:
-            raise NativeContractError("native input annotation must match input_type")
-    if not _annotation_matches(signature.return_annotation, output_type):
-        try:
-            hints = get_type_hints(function)
-        except (NameError, TypeError) as exc:
-            raise NativeContractError(
-                "native return annotation cannot be resolved"
-            ) from exc
-        if hints.get("return") is not output_type:
-            raise NativeContractError("native return annotation must match output_type")
+    if not _annotation_matches(
+        function,
+        parameters[1].annotation,
+        parameters[1].name,
+        input_type,
+    ):
+        raise NativeContractError("native input annotation must match input_type")
+    if not _annotation_matches(
+        function,
+        signature.return_annotation,
+        "return",
+        output_type,
+    ):
+        raise NativeContractError("native return annotation must match output_type")
     if not _is_stub(function):
         raise NativeContractError(
             "native method bodies must contain only a docstring and ..."

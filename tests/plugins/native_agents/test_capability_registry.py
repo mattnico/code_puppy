@@ -215,3 +215,32 @@ async def test_registry_normalizes_handler_failures_and_audits_them(
             -1
         ].model_dump_json()
     )
+
+
+@pytest.mark.asyncio
+async def test_undeclared_capability_is_denied_before_handle_lookup(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, _events, references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+    registry.register(
+        spec, lambda resource, request, _execution: Result(count=len(resource))
+    )
+    undeclared = method.model_copy(update={"allowed_capabilities": ()})
+
+    async def fail_lookup(*args, **kwargs):
+        raise AssertionError("denied declarations must not inspect handles")
+
+    monkeypatch.setattr(references, "describe", fail_lookup)
+    with pytest.raises(CapabilityDeniedError):
+        await registry.invoke(
+            spec.name,
+            handle,
+            Request(limit=1),
+            method=undeclared,
+            execution=execution,
+        )

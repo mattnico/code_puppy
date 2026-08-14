@@ -21,14 +21,15 @@ _ALLOWED_PREDICT_EFFECTS = frozenset(
 class CapabilityPolicy:
     """Authorize declarations before handles are resolved or adapters run."""
 
-    def authorize(
+    def authorize_declaration(
         self,
         *,
         method: MethodSpec,
         execution: ExecutionIdentity,
-        handle: ReferenceHandle,
         capability: CapabilitySpec,
     ) -> AuthorizationDecision:
+        """Check policy independent of live-handle metadata."""
+
         if not is_enabled():
             return AuthorizationDecision(
                 allowed=False, reason="Capability is not permitted for this method."
@@ -45,6 +46,27 @@ class CapabilityPolicy:
             return AuthorizationDecision(
                 allowed=False, reason="Capability is not permitted for this method."
             )
+        if capability.effect not in _ALLOWED_PREDICT_EFFECTS:
+            return AuthorizationDecision(
+                allowed=False, reason="Capability effect is not permitted."
+            )
+        return AuthorizationDecision(allowed=True, reason="allowed")
+
+    def authorize(
+        self,
+        *,
+        method: MethodSpec,
+        execution: ExecutionIdentity,
+        handle: ReferenceHandle,
+        capability: CapabilitySpec,
+    ) -> AuthorizationDecision:
+        decision = self.authorize_declaration(
+            method=method,
+            execution=execution,
+            capability=capability,
+        )
+        if not decision.allowed:
+            return decision
         if capability.resource_type != handle.resource_type:
             return AuthorizationDecision(
                 allowed=False, reason="Capability resource type is not permitted."
@@ -57,8 +79,4 @@ class CapabilityPolicy:
             return AuthorizationDecision(
                 allowed=False, reason="Capability is not permitted for this session."
             )
-        if capability.effect not in _ALLOWED_PREDICT_EFFECTS:
-            return AuthorizationDecision(
-                allowed=False, reason="Capability effect is not permitted."
-            )
-        return AuthorizationDecision(allowed=True, reason="allowed")
+        return decision

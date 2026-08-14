@@ -166,3 +166,24 @@ async def test_cancellation_is_not_marked_success(monkeypatch, tmp_path):
         str(tmp_path / "native.sqlite3"), initialize=False
     ).get_execution(_find_execution_id(tmp_path))
     assert record.status is NativeExecutionStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_runtime_revalidates_injected_strategy_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.runtime.is_enabled", lambda: True
+    )
+    strategy = ReturningStrategy({"summary": "not a model"})
+    runtime = NativeMethodRuntime(
+        db_path=tmp_path / "native.sqlite3", predict_strategy=strategy
+    )
+    agent = NativeReviewerAgent()
+    with pytest.raises(NativeOutputValidationError):
+        await runtime.execute(
+            agent, agent.get_native_method("summarize_change"), _input()
+        )
+    execution_id = _find_execution_id(tmp_path)
+    events = EventStore(str(tmp_path / "native.sqlite3")).list_events(
+        execution_id, limit=10
+    )
+    assert events[-1].kind is NativeEventKind.EXECUTION_FAILED

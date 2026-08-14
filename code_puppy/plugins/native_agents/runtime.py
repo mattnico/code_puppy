@@ -244,6 +244,10 @@ class NativeMethodRuntime:
                     native_context=native_context,
                     on_validation_failure=record_validation_failure,
                 )
+            if not isinstance(result, spec.output_type):
+                raise NativeOutputValidationError(
+                    "native strategy returned an invalid declared output"
+                )
             state_store.set_execution_status(
                 identity.execution_id,
                 NativeExecutionStatus.FINISHED,

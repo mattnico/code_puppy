@@ -7,7 +7,7 @@ from code_puppy.plugins.native_agents.demo_agent import (
     ChangeSummaryResult,
     NativeReviewerAgent,
 )
-from code_puppy.plugins.native_agents.predict import PredictStrategy
+from code_puppy.plugins.native_agents.predict import PredictStrategy, _repair_prompt
 
 
 async def test_predict_strategy_returns_declared_output_through_real_builder(
@@ -91,6 +91,21 @@ async def test_predict_strategy_rejects_wrong_fake_output(monkeypatch):
         )
     except Exception as exc:
         assert exc.code == "native_output_validation_failed"
+
+
+def test_repair_prompt_carries_only_bounded_validation_feedback():
+    agent = NativeReviewerAgent()
+    spec = agent.get_native_method("summarize_change")
+    prompt = _repair_prompt(
+        spec,
+        "original prompt",
+        attempt=2,
+        attempts=2,
+        validation_code="native_output_validation_failed",
+    )
+    assert "native_output_validation_failed" in prompt
+    assert "original prompt" in prompt
+    assert "provider" not in prompt.lower()
 
 
 async def _empty_async_list():

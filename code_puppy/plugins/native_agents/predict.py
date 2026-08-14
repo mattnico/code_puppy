@@ -101,7 +101,13 @@ class PredictStrategy:
                     attempt_prompt = (
                         prompt
                         if attempt == 1
-                        else _repair_prompt(spec, prompt, attempt, attempts)
+                        else _repair_prompt(
+                            spec,
+                            prompt,
+                            attempt,
+                            attempts,
+                            validation_code="native_output_validation_failed",
+                        )
                     )
                     try:
                         result = await pydantic_agent.run(
@@ -120,8 +126,10 @@ class PredictStrategy:
                     except asyncio.CancelledError as exc:
                         error = exc
                         raise
-                    except UnexpectedModelBehavior as exc:
-                        if not _is_output_validation_failure(exc):
+                    except (UnexpectedModelBehavior, ValidationError) as exc:
+                        if isinstance(
+                            exc, UnexpectedModelBehavior
+                        ) and not _is_output_validation_failure(exc):
                             error = exc
                             raise
                         error = exc
@@ -168,13 +176,19 @@ def _is_output_validation_failure(error: BaseException) -> bool:
 
 
 def _repair_prompt(
-    spec: MethodSpec, original_prompt: str, attempt: int, attempts: int
+    spec: MethodSpec,
+    original_prompt: str,
+    attempt: int,
+    attempts: int,
+    *,
+    validation_code: str,
 ) -> str:
-    """Ask for the same contract without echoing provider/model data."""
+    """Ask for the same contract with bounded, model-safe feedback."""
 
     note = (
         f"\n\n## Native method repair attempt {attempt} of {attempts}\n"
-        "The previous response failed typed validation. Return only a valid "
+        "The previous response failed typed validation. "
+        f"Validation code: {validation_code}. Return only a valid "
         f"{spec.output_schema_name} matching the declared output schema. "
         "Do not add commentary, extra fields, or invented evidence."
     )

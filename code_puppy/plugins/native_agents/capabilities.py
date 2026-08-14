@@ -105,6 +105,33 @@ class CapabilityRegistry:
                 "handle_id_hash": hashed_id,
             },
         )
+        declaration_decision = self.policy.authorize_declaration(
+            method=method,
+            execution=execution,
+            capability=spec,
+        )
+        if not declaration_decision.allowed:
+            self._record_denial(
+                execution.execution_id,
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                declaration_decision.reason,
+            )
+            raise CapabilityDeniedError(declaration_decision.reason)
+        try:
+            validated_request = spec.input_model.model_validate(
+                request.model_dump(mode="python")
+            )
+        except (AttributeError, TypeError, ValidationError) as exc:
+            self._record_denial(
+                execution.execution_id,
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                "invalid_request",
+            )
+            raise CapabilityValidationError("capability request is invalid") from exc
         try:
             metadata = await self.references.describe(
                 handle,
@@ -130,32 +157,14 @@ class CapabilityRegistry:
             capability=spec,
         )
         if not decision.allowed:
-            self._event(
+            self._record_denial(
                 execution.execution_id,
-                NativeEventKind.CAPABILITY_DENIED,
-                {
-                    "capability": spec.name,
-                    "effect": spec.effect.value,
-                    "handle_id_hash": hashed_id,
-                    "reason": decision.reason,
-                },
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                decision.reason,
             )
             raise CapabilityDeniedError(decision.reason)
-        try:
-            validated_request = spec.input_model.model_validate(
-                request.model_dump(mode="python")
-            )
-        except (AttributeError, TypeError, ValidationError) as exc:
-            self._event(
-                execution.execution_id,
-                NativeEventKind.CAPABILITY_DENIED,
-                {
-                    "capability": spec.name,
-                    "handle_id_hash": hashed_id,
-                    "reason": "invalid_request",
-                },
-            )
-            raise CapabilityValidationError("capability request is invalid") from exc
         resource = await self.references.resolve(
             metadata,
             execution=execution,
@@ -227,6 +236,25 @@ class CapabilityRegistry:
             completion_payload,
         )
         return validated_result
+
+    def _record_denial(
+        self,
+        execution_id: str,
+        capability: str,
+        effect: str,
+        handle_id_hash_value: str,
+        reason: str,
+    ) -> None:
+        self._event(
+            execution_id,
+            NativeEventKind.CAPABILITY_DENIED,
+            {
+                "capability": capability,
+                "effect": effect,
+                "handle_id_hash": handle_id_hash_value,
+                "reason": reason,
+            },
+        )
 
     def _event(
         self, execution_id: str, kind: NativeEventKind, payload: dict[str, Any]
