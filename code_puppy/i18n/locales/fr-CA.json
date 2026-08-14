@@ -1,6 +1,13 @@
 {
   "native_agents.demo.display_name": "Réviseur natif",
   "native_agents.demo.description": "Examine le texte de changement fourni et renvoie des constats typés.",
+  "native_agents.command.disabled": "Les agents natifs sont désactivés. Activez native_agents_enabled pour les utiliser.",
+  "native_agents.command.diagnostics_disabled": "Les diagnostics natifs sont désactivés.",
+  "native_agents.command.cleanup_unavailable": "Le nettoyage natif est indisponible; les identifiants locaux expirent automatiquement.",
+  "native_agents.command.usage": "Utilisation : /native status|diagnostics|cleanup",
+  "native_agents.command.help": "État et diagnostics des agents natifs (fonctionnalité contrôlée)",
+  "native_agents.command.status": "Agents natifs : {enabled}; CodeAct : {codeact}.",
+  "native_agents.command.diagnostics": "Diagnostics natifs — fonction : {enabled}; CodeAct : {codeact}; stockage : {storage}; schéma : {schema_version}; exécutions : {executions}; DBOS : {dbos}; Kennel : {kennel}.",
   "startup.welcome": "Bienvenue dans Code Puppy, {name}!",
   "startup.ready": "Prêt à aller chercher du code. 🐶",
   "computer_use.startup.opt_in": "Computer Use de macOS est désactivé par défaut. Exécutez `/computer-use enable` pour l’activer.",

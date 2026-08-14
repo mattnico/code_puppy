@@ -245,3 +245,26 @@ creation must come from an already-approved host search result. Context previews
 show a symbolic description and allowed operation names, never the opaque
 handle ID or full result set. Reference cleanup is execution-scoped and
 idempotent.
+
+## Phase 6 ecosystem integration
+
+Tier A keeps Code Puppy's existing seams authoritative. PredictStrategy builds
+through `_builder.build_pydantic_agent`, receives the parent's model/tool/MCP
+configuration, uses existing run contexts/lifecycle callbacks, and carries no
+parallel provider or MCP client. The DBOS adapter reports availability and
+launched state without importing/launching a second runtime; absent or
+not-launched DBOS is normal and safe.
+
+Kennel remains long-term memory, not native state. A method must opt in with
+`MethodSpec.memory_opt_in`; recall is bounded and duplicate content already in
+the parent's prompt is not added again. Native completion never writes Kennel
+implicitly. Session restore correlates execution metadata but never revives
+process-local handles or automatically resumes a model call. Future effectful
+capabilities must use existing permission/tool/shell hooks; Tier A has none.
+
+`/native status`, `/native diagnostics`, and `/native cleanup` are namespaced,
+localized, feature/diagnostics-gated surfaces. Diagnostics expose only bounded
+status/schema/count/integration state and never raw database paths, prompts,
+handle IDs, payloads, or stack traces. Cleanup reports that process-local
+handles expire automatically until a dedicated bounded cleanup operation is
+needed.

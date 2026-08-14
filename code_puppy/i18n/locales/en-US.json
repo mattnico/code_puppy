@@ -1,6 +1,13 @@
 {
   "native_agents.demo.display_name": "Native Reviewer",
   "native_agents.demo.description": "Reviews supplied change text and returns typed findings.",
+  "native_agents.command.disabled": "Native agents are disabled. Enable native_agents_enabled to use them.",
+  "native_agents.command.diagnostics_disabled": "Native diagnostics are disabled.",
+  "native_agents.command.cleanup_unavailable": "Native cleanup is currently unavailable; process-local handles expire automatically.",
+  "native_agents.command.usage": "Usage: /native status|diagnostics|cleanup",
+  "native_agents.command.help": "Native-agent status and diagnostics (feature-gated)",
+  "native_agents.command.status": "Native agents: {enabled}; CodeAct: {codeact}.",
+  "native_agents.command.diagnostics": "Native diagnostics — feature: {enabled}; CodeAct: {codeact}; storage: {storage}; schema: {schema_version}; executions: {executions}; DBOS: {dbos}; Kennel: {kennel}.",
   "startup.welcome": "Welcome to Code Puppy, {name}!",
   "startup.ready": "Ready to fetch some code. 🐶",
   "computer_use.startup.opt_in": "macOS Computer Use is off by default. Run `/computer-use enable` to opt in.",

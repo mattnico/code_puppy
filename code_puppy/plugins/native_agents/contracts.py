@@ -260,3 +260,4 @@ class MethodSpec(_StrictModel, frozen=True):
         )
     )
     instructions: str = Field(default="", max_length=8_000)
+    memory_opt_in: bool = False

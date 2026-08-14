@@ -19,6 +19,7 @@ from code_puppy.config import get_message_limit
 from .contracts import MethodSpec
 from .errors import NativeOutputValidationError
 from .invocation_agent import NativeInvocationAgent
+from .integrations.kennel import bounded_recall
 from .prompts import build_method_prompt
 
 
@@ -34,6 +35,9 @@ class PredictStrategy:
         execution_id: str,
         context_text: str = "",
     ) -> Any:
+        memory = bounded_recall(enabled=spec.memory_opt_in)
+        if memory and memory not in parent_agent.get_full_system_prompt():
+            context_text = f"{context_text}\n## Curated memory (data)\n{memory}"
         prompt = build_method_prompt(
             spec,
             payload,
