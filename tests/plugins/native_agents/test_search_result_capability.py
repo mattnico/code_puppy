@@ -82,6 +82,10 @@ def test_search_adapter_enforces_bounded_operations_and_safe_prefixes():
         _filter_prefix(resource, SearchPrefixRequest(prefix="C:/repo"), execution)
     with pytest.raises(ValidationError):
         SearchPageRequest(limit=51)
+    with pytest.raises(ValidationError):
+        SearchMatch(path="../outside", snippet="unsafe")
+    with pytest.raises(ValidationError):
+        SearchMatch(path="/absolute/path", snippet="unsafe")
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import time
@@ -184,11 +185,21 @@ class CapabilityRegistry:
                 decision.reason,
             )
             raise CapabilityDeniedError(decision.reason)
-        resource = await self.references.resolve(
-            metadata,
-            execution=execution,
-            expected_type=spec.resource_type,
-        )
+        try:
+            resource = await self.references.resolve(
+                metadata,
+                execution=execution,
+                expected_type=spec.resource_type,
+            )
+        except HandleUnavailableError:
+            self._record_denial(
+                execution.execution_id,
+                spec.name,
+                spec.effect.value,
+                hashed_id,
+                "handle_unavailable",
+            )
+            raise
         started = time.monotonic()
         try:
             result = handler(resource, validated_request, execution)
@@ -213,6 +224,18 @@ class CapabilityRegistry:
                 raise CapabilityValidationError(
                     "capability returned an out-of-scope handle"
                 )
+        except asyncio.CancelledError:
+            self._event(
+                execution.execution_id,
+                NativeEventKind.CAPABILITY_COMPLETED,
+                {
+                    "capability": spec.name,
+                    "handle_id_hash": hashed_id,
+                    "outcome": "cancelled",
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            raise
         except CapabilityValidationError:
             self._event(
                 execution.execution_id,
@@ -260,6 +283,7 @@ class CapabilityRegistry:
                 {
                     "derived_handle_id_hash": handle_id_hash(derived_handle.handle_id),
                     "parent_handle_id_hash": hashed_id,
+                    "operation": spec.name,
                 }
             )
         self._event(

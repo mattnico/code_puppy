@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from math import isfinite
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import TypeAliasType
@@ -219,7 +220,7 @@ class ContextBlock(_StrictModel, frozen=True):
     name: str = Field(min_length=1, max_length=100)
     priority: int
     content: str = Field(max_length=100_000)
-    source: str = Field(min_length=1, max_length=50)
+    source: Literal["method", "state", "events", "references", "memory"]
     truncated: bool = False
 
 
@@ -276,6 +277,24 @@ class SearchMatch(_StrictModel, frozen=True):
     path: str = Field(min_length=1, max_length=2_000)
     line_number: int | None = Field(default=None, ge=1)
     snippet: str = Field(max_length=8_000)
+
+    @field_validator("path")
+    @classmethod
+    def _validate_relative_path(cls, value: str) -> str:
+        """Keep search resources relative to their approved root."""
+
+        candidate = value.replace("\\", "/")
+        if (
+            not candidate
+            or candidate.startswith(("/", "~"))
+            or (len(candidate) >= 2 and candidate[1] == ":")
+            or any(part == ".." for part in candidate.split("/"))
+        ):
+            raise ValueError("search match paths must be relative and traversal-free")
+        normalized = posixpath.normpath(candidate)
+        if normalized in {"", "."}:
+            raise ValueError("search match path must not be empty")
+        return normalized
 
 
 class SearchResultSet(_StrictModel, frozen=True):

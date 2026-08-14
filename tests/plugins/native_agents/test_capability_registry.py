@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import asyncio
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -244,3 +245,58 @@ async def test_undeclared_capability_is_denied_before_handle_lookup(
             method=undeclared,
             execution=execution,
         )
+
+
+@pytest.mark.asyncio
+async def test_expiry_race_is_denied_and_audited(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, events, references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+    registry.register(
+        spec, lambda resource, request, _execution: Result(count=len(resource))
+    )
+
+    async def unavailable(*args, **kwargs):
+        raise HandleUnavailableError("reference handle unavailable")
+
+    monkeypatch.setattr(references, "resolve", unavailable)
+    with pytest.raises(HandleUnavailableError):
+        await registry.invoke(
+            spec.name,
+            handle,
+            Request(limit=1),
+            method=method,
+            execution=execution,
+        )
+    event = events.list_events(execution.execution_id, limit=20)[-1]
+    assert event.kind is NativeEventKind.CAPABILITY_DENIED
+    assert event.payload["reason"] == "handle_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_capability_is_audited_and_propagates(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.capability_policy.is_enabled", lambda: True
+    )
+    execution, events, references, registry, spec, method, handle = await _setup(
+        tmp_path
+    )
+
+    async def cancelled(*args):
+        raise asyncio.CancelledError
+
+    registry.register(spec, cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await registry.invoke(
+            spec.name,
+            handle,
+            Request(limit=1),
+            method=method,
+            execution=execution,
+        )
+    event = events.list_events(execution.execution_id, limit=20)[-1]
+    assert event.kind is NativeEventKind.CAPABILITY_COMPLETED
+    assert event.payload["outcome"] == "cancelled"
