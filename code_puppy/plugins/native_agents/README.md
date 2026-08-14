@@ -271,16 +271,18 @@ ever introduced later. Preserve redacted execution evidence, revoke live
 handles, add a regression/security test, and require a new security review
 before any later CodeAct work.
 
-Release evidence in this branch: 84 deterministic native-agent tests, 403
+Release evidence in this branch: 86 deterministic native-agent tests, 403
 focused native/agent/integration/i18n regression tests, full Ruff check/format,
-and no external model credentials. The final repository-wide run reports 7,268
+and no external model credentials. The final repository-wide run reports 7,270
 passing tests, 23 skipped, 1 xpassed, and three unrelated
-model-picker/attachment failures outside the changed paths.
-covers success, invalid contracts, bounded validation failure, cancellation,
-storage failure, state conflict, redaction, context truncation, compaction
-survival, expired and cross-execution handles, policy denial, search
-capabilities, optional DBOS/MCP/Kennel/session/permission behavior,
-diagnostics, and localized messages.
+model-picker/attachment failures outside the changed paths. The added
+capability-boundary tests cover expiry races, cancellation audit outcomes, and
+Windows drive-path rejection. The suite covers success, invalid contracts,
+bounded validation failure, cancellation, storage failure, state conflict,
+redaction, context truncation, compaction survival, expired and
+cross-execution handles, policy denial, search capabilities, optional
+DBOS/MCP/Kennel/session/permission behavior, diagnostics, and localized
+messages.
 
 ## Phase 6 ecosystem integration
 
