@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pydantic_ai.models.test import TestModel
 
 from code_puppy.plugins.native_agents.demo_agent import (
@@ -7,6 +9,7 @@ from code_puppy.plugins.native_agents.demo_agent import (
     ChangeSummaryResult,
     NativeReviewerAgent,
 )
+from code_puppy.plugins.native_agents.errors import NativeOutputValidationError
 from code_puppy.plugins.native_agents.predict import PredictStrategy, _repair_prompt
 
 
@@ -63,6 +66,39 @@ async def test_predict_strategy_returns_declared_output_through_real_builder(
     assert agent.pydantic_agent is None
     assert agent._code_generation_agent is None
     assert end_calls == [{"success": True, "error": None}]
+
+
+async def test_predict_strategy_normalizes_real_output_retry_failure(monkeypatch):
+    """Provider retry exhaustion must not escape the native boundary."""
+
+    monkeypatch.setattr(
+        "code_puppy.plugins.native_agents.predict.is_enabled", lambda: True
+    )
+    import code_puppy.agents._builder as builder
+
+    monkeypatch.setattr(
+        builder,
+        "load_model_with_fallback",
+        lambda *args, **kwargs: (
+            TestModel(custom_output_args={"summary": "missing required fields"}),
+            "test",
+        ),
+    )
+    monkeypatch.setattr(builder, "load_mcp_servers", lambda **kwargs: [])
+
+    agent = NativeReviewerAgent()
+    with pytest.raises(NativeOutputValidationError) as caught:
+        await PredictStrategy().execute(
+            agent,
+            agent.get_native_method("summarize_change"),
+            ChangeSummaryInput(request="review", diff_text="+ value"),
+            execution_id="exec-real-validation-failure",
+        )
+
+    assert caught.value.code == "native_output_validation_failed"
+    assert "Exceeded maximum retries" not in str(caught.value)
+    assert caught.value.__cause__ is not None
+    assert type(caught.value.__cause__).__name__ == "UnexpectedModelBehavior"
 
 
 async def test_predict_strategy_rejects_wrong_fake_output(monkeypatch):
