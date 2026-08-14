@@ -7,7 +7,10 @@ registering callbacks at import time. The callback entry point lives in
 
 from .contracts import (
     CapabilityEffect,
+    ContextBlock,
     ContextBudget,
+    EventQuery,
+    EventSummary,
     ExecutionIdentity,
     MethodSpec,
     NativeEvent,
@@ -17,6 +20,7 @@ from .contracts import (
     NativeStateEnvelope,
     NativeStrategyName,
 )
+from .events import EventService, EventStore
 from .errors import (
     EventStoreError,
     NativeAgentError,
@@ -30,8 +34,13 @@ from .errors import (
 
 __all__ = [
     "CapabilityEffect",
+    "ContextBlock",
     "ContextBudget",
+    "EventQuery",
+    "EventService",
+    "EventStore",
     "EventStoreError",
+    "EventSummary",
     "ExecutionIdentity",
     "MethodSpec",
     "NativeAgentError",

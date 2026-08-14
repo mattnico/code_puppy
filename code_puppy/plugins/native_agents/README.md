@@ -154,11 +154,12 @@ Phase 1 configuration defaults are bounded:
 - `native_agents_store_retention_days`: 30 (1–3650);
 - `native_agents_context_max_chars`: 12,000 (256–100,000);
 - `native_agents_event_max_per_view`: 30 (0–500);
+- `native_agents_state_max_bytes`: 65,536 (1,048–1,048,576);
 - diagnostics and the reserved CodeAct flag remain off.
 
-No native method, generic native tool, prompt fragment, agent registration,
-CodeAct worker, handle store, or capability adapter is exposed yet. Those
-behaviors belong to later phases and must keep this substrate's fail-closed
+Phase 1 did not expose a native method, generic native tool, prompt fragment,
+agent registration, CodeAct worker, handle store, or capability adapter. Those
+behaviors belong to later phases and keep this substrate's fail-closed
 contract.
 
 ## Phase 2 typed prediction
@@ -191,3 +192,31 @@ deterministic tests covering strict contracts, migrations, state revisions,
 stale conflicts, redaction, immutable events, scope cleanup, cancellation,
 and disabled/failed registration. The repository's existing unrelated
 untracked documentation remains intentionally untouched.
+
+## Phase 3 durable context
+
+Phase 3 adds `StateService` for declared Pydantic state. Replacements validate
+the exact state type, enforce a bounded serialized byte size, require a stable
+developer-authored reason identifier, compare the expected revision before the
+write, and append a changed-field summary atomically with the new snapshot.
+State is still JSON-only and redacted; it is never a transcript or provider
+object.
+
+`EventQuery`, `EventService`, and `EventSummary` provide hard-bounded,
+execution-owned reads. Raw payloads are omitted by default from queries;
+summary text is deterministic and redacted. The low-level store remains useful
+for trusted host diagnostics, while the service facade cannot read another
+execution's events by accident.
+
+`ContextRenderer` produces priority-ordered `NativeContextView` blocks for the
+method contract, execution status, allowlisted typed state, and recent event
+summaries. Every block and the total view are bounded. Truncation is explicit,
+state is labeled untrusted data, secret-looking fields are excluded, and
+omitted content is not echoed in the marker. `PredictStrategy` receives a
+fresh rendered view; it is not appended to normal parent history.
+
+`NativeHistoryContext` is an inspection-only compaction seam: a native
+follow-up asks the durable renderer for current context instead of trusting a
+compacted transcript. `inspect_resume` reports terminal/interrupted status,
+retention, and method-version eligibility but never automatically replays a
+crashed model call.

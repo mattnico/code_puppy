@@ -17,6 +17,7 @@ _DEFAULTS = {
     "native_agents_store_retention_days": (30, 1, 3650),
     "native_agents_context_max_chars": (12_000, 256, 100_000),
     "native_agents_event_max_per_view": (30, 0, 500),
+    "native_agents_state_max_bytes": (65_536, 1_048, 1_048_576),
 }
 
 
@@ -77,6 +78,10 @@ def context_max_chars() -> int:
 
 def event_max_per_view() -> int:
     return bounded_int("native_agents_event_max_per_view")
+
+
+def state_max_bytes() -> int:
+    return bounded_int("native_agents_state_max_bytes")
 
 
 def validate_storage_path(path: Path) -> Path:

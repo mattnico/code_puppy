@@ -18,6 +18,7 @@ from .contracts import (
 from .errors import StateConflictError, StateSchemaError
 from .contracts import NativeEventKind
 from .events import append_event_on_connection, redact_payload
+from .lifecycle import validate_transition
 from .storage import connect, initialize_database, parse_timestamp, timestamp, utc_now
 
 StateModel = TypeVar("StateModel", bound=BaseModel)
@@ -155,6 +156,18 @@ class StateStore:
         )
         with connect(self.path) as connection:
             connection.execute("BEGIN")
+            current_row = connection.execute(
+                "SELECT status FROM native_executions WHERE execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+            if current_row is None:
+                raise StateSchemaError("native execution does not exist")
+            try:
+                validate_transition(NativeExecutionStatus(current_row[0]), status)
+            except ValueError as exc:
+                raise StateSchemaError(
+                    "stored native execution status is invalid"
+                ) from exc
             result = connection.execute(
                 "UPDATE native_executions SET status = ?, started_at = COALESCE(?, started_at), "
                 "finished_at = COALESCE(?, finished_at), error_code = ?, error_summary = ? "
@@ -250,6 +263,7 @@ class StateStore:
         state: StateModel,
         schema_name: str,
         schema_version: int,
+        event_payload: dict[str, Any] | None = None,
     ) -> NativeStateEnvelope:
         if expected_revision < 1 or schema_version < 1:
             raise StateSchemaError("state revision and schema version must be positive")
@@ -288,7 +302,11 @@ class StateStore:
                 connection,
                 execution_id,
                 NativeEventKind.STATE_UPDATED,
-                {"revision": revision, "schema_name": schema_name},
+                event_payload
+                or {
+                    "revision": revision,
+                    "schema_name": schema_name,
+                },
                 occurred_at=now,
             )
             connection.commit()

@@ -11,8 +11,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .context import ContextRenderer, render_context_text
 from .config import database_path, is_enabled
 from .contracts import (
+    EventQuery,
     ExecutionIdentity,
     MethodSpec,
     NativeEventKind,
@@ -133,6 +135,34 @@ class NativeMethodRuntime:
         state_store.set_execution_status(
             identity.execution_id, NativeExecutionStatus.RUNNING
         )
+        execution = state_store.get_execution(identity.execution_id)
+        if execution is None:  # pragma: no cover - storage invariant
+            raise NativeStorageUnavailableError("native execution record disappeared")
+        state_snapshot = state_store.get_state(identity.execution_id)
+        event_limit = spec.context_budget.max_events
+        event_summaries = (
+            event_store.summaries(
+                identity.execution_id,
+                EventQuery(limit=max(1, event_limit)),
+            )
+            if event_limit
+            else []
+        )
+        context_view = ContextRenderer().render(
+            spec=spec,
+            execution=execution,
+            state=state_snapshot,
+            events=event_summaries,
+        )
+        event_store.append(
+            identity.execution_id,
+            NativeEventKind.CONTEXT_RENDERED,
+            {
+                "total_chars": context_view.total_chars,
+                "truncated": context_view.truncated,
+                "blocks": [block.name for block in context_view.blocks],
+            },
+        )
 
         try:
             async with execution_scope(identity):
@@ -141,6 +171,7 @@ class NativeMethodRuntime:
                     spec,
                     payload,
                     execution_id=identity.execution_id,
+                    context_text=render_context_text(context_view),
                 )
         except asyncio.CancelledError:
             await self._record_failure(

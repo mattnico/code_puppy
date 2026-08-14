@@ -95,6 +95,20 @@ class NativeStateEnvelope(_StrictModel, frozen=True):
     updated_at: datetime
 
 
+class EventQuery(_StrictModel, frozen=True):
+    kinds: tuple[NativeEventKind, ...] = ()
+    after_sequence: int | None = Field(default=None, ge=0)
+    limit: int = Field(default=20, ge=1, le=500)
+    include_payload: bool = False
+
+
+class EventSummary(_StrictModel, frozen=True):
+    sequence: int = Field(ge=1)
+    kind: NativeEventKind
+    occurred_at: datetime
+    summary: str = Field(max_length=500)
+
+
 class NativeEvent(_StrictModel, frozen=True):
     event_id: str
     execution_id: str
@@ -109,6 +123,21 @@ class ContextBudget(_StrictModel, frozen=True):
     max_chars: int = Field(ge=256, le=100_000)
     max_events: int = Field(ge=0, le=500)
     max_preview_items: int = Field(ge=0, le=100)
+
+
+class ContextBlock(_StrictModel, frozen=True):
+    name: str = Field(min_length=1, max_length=100)
+    priority: int
+    content: str = Field(max_length=100_000)
+    source: str = Field(min_length=1, max_length=50)
+    truncated: bool = False
+
+
+class NativeContextView(_StrictModel, frozen=True):
+    execution_id: str
+    blocks: tuple[ContextBlock, ...] | list[ContextBlock]
+    total_chars: int = Field(ge=0)
+    truncated: bool = False
 
 
 class MethodSpec(_StrictModel, frozen=True):

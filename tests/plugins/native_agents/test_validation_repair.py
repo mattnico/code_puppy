@@ -78,6 +78,7 @@ async def test_runtime_returns_typed_result_and_records_finished_events(
     )
     assert [event.kind for event in events] == [
         NativeEventKind.EXECUTION_STARTED,
+        NativeEventKind.CONTEXT_RENDERED,
         NativeEventKind.EXECUTION_FINISHED,
     ]
 
@@ -115,6 +116,7 @@ async def test_validation_failure_is_bounded_evented_and_typed(monkeypatch, tmp_
     )
     assert [event.kind for event in events] == [
         NativeEventKind.EXECUTION_STARTED,
+        NativeEventKind.CONTEXT_RENDERED,
         NativeEventKind.VALIDATION_FAILED,
         NativeEventKind.EXECUTION_FAILED,
     ]

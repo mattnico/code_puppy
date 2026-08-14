@@ -31,6 +31,7 @@ def build_method_prompt(
     *,
     execution_id: str,
     parent_agent_name: str,
+    context_text: str = "",
 ) -> str:
     """Render one deterministic, bounded model prompt."""
 
@@ -49,6 +50,9 @@ def build_method_prompt(
     schema = _schema_json(spec.output_type, budget)
     instructions = spec.instructions.strip()
     instruction_block = f"\nMethod notes:\n{instructions}\n" if instructions else ""
+    context_block = (
+        f"\n## Current execution context\n{context_text}\n" if context_text else ""
+    )
     prompt = (
         f"## Native method: {spec.name}\n"
         "Produce an evidence-based structured result. Return every required "
@@ -57,7 +61,7 @@ def build_method_prompt(
         f"Execution: {execution_id}\n"
         f"Parent agent: {parent_agent_name}\n"
         f"Output schema: {schema}\n"
-        f"{instruction_block}\n"
+        f"{instruction_block}{context_block}\n"
         f"## Input\n{input_json}"
     )
     if len(prompt) > budget:

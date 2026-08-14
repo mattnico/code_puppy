@@ -32,12 +32,14 @@ class PredictStrategy:
         payload: Any,
         *,
         execution_id: str,
+        context_text: str = "",
     ) -> Any:
         prompt = build_method_prompt(
             spec,
             payload,
             execution_id=execution_id,
             parent_agent_name=parent_agent.name,
+            context_text=context_text,
         )
         invocation_agent = NativeInvocationAgent(parent_agent, spec, prompt)
         pydantic_agent = build_pydantic_agent(

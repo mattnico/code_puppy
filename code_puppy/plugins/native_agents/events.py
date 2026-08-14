@@ -12,7 +12,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .contracts import JsonValue, NativeEvent, NativeEventKind
+from .contracts import (
+    EventQuery,
+    EventSummary,
+    JsonValue,
+    NativeEvent,
+    NativeEventKind,
+)
 from .errors import EventStoreError
 from .storage import (
     connect,
@@ -76,7 +82,7 @@ def redact_payload(value: Any) -> dict[str, JsonValue]:
     return decoded
 
 
-def _event_from_row(row: sqlite3.Row) -> NativeEvent:
+def _event_from_row(row: sqlite3.Row, *, include_payload: bool = True) -> NativeEvent:
     try:
         payload = json.loads(row["payload_json"])
         return NativeEvent(
@@ -85,11 +91,29 @@ def _event_from_row(row: sqlite3.Row) -> NativeEvent:
             sequence=int(row["sequence"]),
             kind=NativeEventKind(row["kind"]),
             occurred_at=parse_timestamp(row["occurred_at"]),
-            payload=payload,
+            payload=payload if include_payload else {},
             redacted=bool(row["redacted"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise EventStoreError("stored native event is invalid") from exc
+
+
+def _summary_text(event: NativeEvent) -> str:
+    """Produce a deterministic bounded summary without raw payload dumps."""
+
+    summary = event.kind.value.replace("_", " ")
+    if event.kind is NativeEventKind.VALIDATION_FAILED:
+        code = event.payload.get("error_code")
+        if isinstance(code, str):
+            summary += f": {code}"
+    elif event.kind in {
+        NativeEventKind.STATE_INITIALIZED,
+        NativeEventKind.STATE_UPDATED,
+    }:
+        revision = event.payload.get("revision") or event.payload.get("to_revision")
+        if isinstance(revision, int):
+            summary += f" revision {revision}"
+    return summary[:500]
 
 
 def append_event_on_connection(
@@ -165,6 +189,34 @@ class EventStore:
         except sqlite3.Error as exc:
             raise EventStoreError("native event append failed") from exc
 
+    def query(self, execution_id: str, query: EventQuery) -> list[NativeEvent]:
+        """Query one execution with an explicit hard limit."""
+
+        try:
+            with connect(self.path) as connection:
+                sql = (
+                    "SELECT event_id, execution_id, sequence, kind, occurred_at, "
+                    "payload_json, redacted FROM native_events "
+                    "WHERE execution_id = ?"
+                )
+                params: list[Any] = [execution_id]
+                if query.kinds:
+                    placeholders = ",".join("?" for _ in query.kinds)
+                    sql += f" AND kind IN ({placeholders})"
+                    params.extend(kind.value for kind in query.kinds)
+                if query.after_sequence is not None:
+                    sql += " AND sequence > ?"
+                    params.append(query.after_sequence)
+                sql += " ORDER BY sequence ASC LIMIT ?"
+                params.append(query.limit)
+                rows = connection.execute(sql, params).fetchall()
+            return [
+                _event_from_row(row, include_payload=query.include_payload)
+                for row in rows
+            ]
+        except sqlite3.Error as exc:
+            raise EventStoreError("native event query failed") from exc
+
     def list_events(
         self,
         execution_id: str,
@@ -176,17 +228,37 @@ class EventStore:
             raise EventStoreError("event query limit must be between 1 and 500")
         if after_sequence < 0:
             raise EventStoreError("event sequence must not be negative")
-        try:
-            with connect(self.path) as connection:
-                rows = connection.execute(
-                    "SELECT event_id, execution_id, sequence, kind, occurred_at, "
-                    "payload_json, redacted FROM native_events "
-                    "WHERE execution_id = ? AND sequence > ? "
-                    "ORDER BY sequence ASC LIMIT ?",
-                    (execution_id, after_sequence, limit),
-                ).fetchall()
-            return [_event_from_row(row) for row in rows]
-        except EventStoreError:
-            raise
-        except sqlite3.Error as exc:
-            raise EventStoreError("native event query failed") from exc
+        return self.query(
+            execution_id,
+            EventQuery(
+                limit=limit, after_sequence=after_sequence, include_payload=True
+            ),
+        )
+
+    def summaries(self, execution_id: str, query: EventQuery) -> list[EventSummary]:
+        """Return deterministic bounded summaries with payloads omitted."""
+
+        summary_query = query.model_copy(update={"include_payload": True})
+        return [
+            EventSummary(
+                sequence=event.sequence,
+                kind=event.kind,
+                occurred_at=event.occurred_at,
+                summary=_summary_text(event),
+            )
+            for event in self.query(execution_id, summary_query)
+        ]
+
+
+class EventService:
+    """Execution-owned query facade; cross-execution reads are impossible."""
+
+    def __init__(self, execution_id: str, store: EventStore) -> None:
+        self.execution_id = execution_id
+        self.store = store
+
+    def query(self, query: EventQuery) -> list[NativeEvent]:
+        return self.store.query(self.execution_id, query)
+
+    def summaries(self, query: EventQuery) -> list[EventSummary]:
+        return self.store.summaries(self.execution_id, query)
